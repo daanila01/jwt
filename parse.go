@@ -52,6 +52,18 @@ type ParseOptions struct {
 // Decoding merges into h and c and does not clear them first, so a field set by
 // an earlier token survives one that omits it. Pass freshly zeroed values.
 func Parse(token string, h headers, c claims, verifier Verifier, opts ParseOptions) error {
+	if h == nil {
+		h = &RegisteredHeaders{}
+	}
+	if c == nil {
+		c = &RegisteredClaims{}
+	}
+	if h.registeredHeaders() == nil {
+		return fmt.Errorf("%w: headers is nil", ErrTokenInvalid)
+	}
+	if c.registeredClaims() == nil {
+		return fmt.Errorf("%w: claims is nil", ErrTokenInvalid)
+	}
 	if verifier == nil {
 		return fmt.Errorf("%w: verifier is nil", ErrArgumentInvalid)
 	}
@@ -104,10 +116,6 @@ func prepareParseOptions(opts *ParseOptions) {
 }
 
 func parseHeaders(segment string, h headers, verifier Verifier) error {
-	if h == nil {
-		h = &RegisteredHeaders{}
-	}
-
 	hDec, err := base64.RawURLEncoding.DecodeString(segment)
 	if err != nil {
 		return fmt.Errorf("%w: failed to decode headers: %w", ErrTokenInvalid, err)
@@ -132,10 +140,6 @@ func parseHeaders(segment string, h headers, verifier Verifier) error {
 }
 
 func parseClaims(segment string, c claims, opts ParseOptions) error {
-	if c == nil {
-		c = &RegisteredClaims{}
-	}
-
 	cDec, err := base64.RawURLEncoding.DecodeString(segment)
 	if err != nil {
 		return fmt.Errorf("%w: failed to decode claims: %w", ErrTokenInvalid, err)
