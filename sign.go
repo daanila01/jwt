@@ -17,6 +17,9 @@ type SignOptions struct {
 	// a token that never expires; pass a value unless you are certain that is
 	// what you want.
 	Expiration time.Time
+
+	// IssuedAt sets the iat claim. The zero value leaves it unset.
+	IssuedAt time.Time
 }
 
 // Sign encodes and signs a token, returning it in compact serialization,
@@ -76,5 +79,8 @@ func setRegisteredClaims(c claims, opts SignOptions) {
 	}
 	if !opts.Expiration.IsZero() {
 		c.registeredClaims().Expiration = opts.Expiration.Unix()
+	}
+	if !opts.IssuedAt.IsZero() {
+		c.registeredClaims().IssuedAt = opts.IssuedAt.Unix()
 	}
 }

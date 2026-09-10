@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +20,16 @@ type ParseOptions struct {
 	// MaxTokenSize is the largest input accepted, in bytes. Zero means
 	// [DefaultMaxTokenSize].
 	MaxTokenSize int
+
+	// ExpectedIssuer is the iss claim the token must carry, compared byte for
+	// byte. An empty value skips the check.
+	ExpectedIssuer string
+
+	// ExpectedAudience is this verifier's own name, which must appear among the
+	// token's aud claim. One name, because a verifier is one service, while a
+	// token may be addressed to several. An empty value skips the check; a
+	// non-empty one also rejects a token that carries no audience at all.
+	ExpectedAudience string
 
 	// NotBeforeValidation checks the nbf claim. A token without one is rejected.
 	NotBeforeValidation bool
@@ -149,6 +160,18 @@ func parseClaims(segment string, c claims, opts ParseOptions) error {
 	}
 	if err := json.Unmarshal(cDec, c); err != nil {
 		return fmt.Errorf("%w: failed to unmarshal claims: %w", ErrTokenInvalid, err)
+	}
+
+	if opts.ExpectedIssuer != "" {
+		if c.registeredClaims().Issuer != opts.ExpectedIssuer {
+			return fmt.Errorf("%w: issuer mismatch: expected %s, got %s", ErrTokenInvalid, opts.ExpectedIssuer, c.registeredClaims().Issuer)
+		}
+	}
+
+	if opts.ExpectedAudience != "" {
+		if !slices.Contains(c.registeredClaims().Audience, opts.ExpectedAudience) {
+			return fmt.Errorf("%w: audience mismatch: expected %s, got %s", ErrTokenInvalid, opts.ExpectedAudience, c.registeredClaims().Audience)
+		}
 	}
 
 	if opts.ExpirationValidation {

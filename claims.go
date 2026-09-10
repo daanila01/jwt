@@ -15,12 +15,40 @@ type claims interface {
 // uses. The shallower field wins silently, this package keeps reading the
 // embedded zero value, and validation stops working without reporting anything.
 type RegisteredClaims struct {
+	// ID is the jti claim: an identifier unique among the tokens an issuer
+	// produces. This package neither generates nor checks it. It exists so that
+	// an application can keep a revocation list or refuse a replayed token,
+	// which needs storage this package does not have.
+	ID string `json:"jti,omitempty"`
+
+	// Audience is the aud claim: who the token is meant for. A token may name
+	// several recipients, which is why this is a list even when it holds one
+	// name. See [Audience] for how the two wire forms are read.
+	//
+	// Validated by [ParseOptions.ExpectedAudience].
+	Audience Audience `json:"aud,omitempty"`
+
+	// Issuer is the iss claim: who produced the token. Compared byte for byte,
+	// with no normalization, so it must match exactly.
+	//
+	// Validated by [ParseOptions.ExpectedIssuer].
+	Issuer string `json:"iss,omitempty"`
+
+	// Subject is the sub claim: who the token is about, usually a user
+	// identifier. This package never validates it; only the application knows
+	// what a subject means.
+	Subject string `json:"sub,omitempty"`
 	// Expiration is the exp claim: seconds since the Unix epoch, after which the
 	// token must be rejected. The moment itself is already expired.
 	Expiration int64 `json:"exp,omitempty"`
 	// NotBefore is the nbf claim: seconds since the Unix epoch, before which the
 	// token must be rejected. The moment itself is valid.
 	NotBefore int64 `json:"nbf,omitempty"`
+	// IssuedAt is the iat claim: seconds since the Unix epoch at which the token
+	// was produced. It never makes a token invalid on its own, so nothing here
+	// checks it. Set it through [SignOptions.IssuedAt] when you want to know a
+	// token's age, or to refuse every token issued before some moment.
+	IssuedAt int64 `json:"iat,omitempty"`
 }
 
 func (c *RegisteredClaims) registeredClaims() *RegisteredClaims {

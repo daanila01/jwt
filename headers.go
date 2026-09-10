@@ -21,6 +21,13 @@ type RegisteredHeaders struct {
 	// Algorithm is the alg header parameter. On parse it is compared against the
 	// verifier's algorithm and never used to choose one.
 	Algorithm string `json:"alg,omitempty"`
+	// KeyID is the kid header parameter: which key to verify with. It carries an
+	// issuer's own naming and means nothing to this package, which neither reads
+	// it during [Parse] nor uses it to choose a verifier.
+	//
+	// Set it while a key is being rotated, so that a verifier holding both the
+	// old and the new key can tell which one signed a given token.
+	KeyID string `json:"kid,omitempty"`
 }
 
 func (h *RegisteredHeaders) registeredHeaders() *RegisteredHeaders {
