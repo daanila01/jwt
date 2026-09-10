@@ -2,8 +2,8 @@
 
 A JSON Web Token library for Go, written against the RFCs with no external dependencies.
 
-> **Status: v0, work in progress.** Only HS256 is implemented so far and the API is still
-> moving. Do not depend on it from anything you care about yet.
+> **Status: v0.** HS256 is implemented; the remaining algorithms and registered claims
+> are on the way.
 
 **Scope: JWS only.** This package signs and verifies tokens (RFC 7515). It does not
 implement JWE (encryption), and is not planned to. When people say "JWT" they almost
