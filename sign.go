@@ -42,12 +42,8 @@ func Sign(h headers, c claims, signer Signer, opts SignOptions) (string, error) 
 		return "", fmt.Errorf("%w: signer is nil", ErrArgumentInvalid)
 	}
 
-	if err := setRegisteredHeaders(h, signer); err != nil {
-		return "", err
-	}
-	if err := setRegisteredClaims(c, opts); err != nil {
-		return "", err
-	}
+	setRegisteredHeaders(h, signer)
+	setRegisteredClaims(c, opts)
 
 	hEnc, err := json.Marshal(h)
 	if err != nil {
@@ -68,21 +64,17 @@ func Sign(h headers, c claims, signer Signer, opts SignOptions) (string, error) 
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(s), nil
 }
 
-func setRegisteredHeaders(h headers, signer Signer) error {
+func setRegisteredHeaders(h headers, signer Signer) {
 	hd := h.registeredHeaders()
 	hd.Type = headerTypeJWT
 	hd.Algorithm = signer.Algorithm()
-
-	return nil
 }
 
-func setRegisteredClaims(c claims, opts SignOptions) error {
+func setRegisteredClaims(c claims, opts SignOptions) {
 	if !opts.NotBefore.IsZero() {
 		c.registeredClaims().NotBefore = opts.NotBefore.Unix()
 	}
 	if !opts.Expiration.IsZero() {
 		c.registeredClaims().Expiration = opts.Expiration.Unix()
 	}
-
-	return nil
 }
