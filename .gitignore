@@ -1,0 +1,21 @@
+# Binaries
+/tmp/
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local-only
+CLAUDE.md
