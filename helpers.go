@@ -1,6 +1,8 @@
 package jwt
 
-import "reflect"
+import (
+	"reflect"
+)
 
 func isNil(v any) bool {
 	if v == nil {
@@ -9,7 +11,7 @@ func isNil(v any) bool {
 
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
-	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface, reflect.UnsafePointer:
 		if rv.IsNil() {
 			return true
 		}
