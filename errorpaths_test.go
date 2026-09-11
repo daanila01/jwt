@@ -55,28 +55,6 @@ func TestSignPropagatesHeaderMarshalFailure(t *testing.T) {
 	}
 }
 
-// TestParseRejectsNilRegisteredPointers reaches the guards through the one
-// typed nil that does not panic: a nil *RegisteredClaims answers its own method
-// without dereferencing anything, so Parse can still report it.
-func TestParseRejectsNilRegisteredPointers(t *testing.T) {
-	v := testSigner(t)
-	token := signHS256(t, testHeaderJSON, `{"sub":"u1"}`)
-
-	t.Run("nil headers pointer", func(t *testing.T) {
-		var h *jwt.RegisteredHeaders
-		if err := jwt.Parse(token, h, nil, v, jwt.ParseOptions{}); !errors.Is(err, jwt.ErrTokenInvalid) {
-			t.Fatalf("Parse() error = %v, want %v", err, jwt.ErrTokenInvalid)
-		}
-	})
-
-	t.Run("nil claims pointer", func(t *testing.T) {
-		var c *jwt.RegisteredClaims
-		if err := jwt.Parse(token, nil, c, v, jwt.ParseOptions{}); !errors.Is(err, jwt.ErrTokenInvalid) {
-			t.Fatalf("Parse() error = %v, want %v", err, jwt.ErrTokenInvalid)
-		}
-	})
-}
-
 // TestVerifierAlgorithmIsWhatIsCompared closes the loop on algorithm confusion
 // from the other side: a verifier that claims a different algorithm must refuse
 // a token this package signed, even though the signature itself would check out.

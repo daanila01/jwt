@@ -69,11 +69,11 @@ func Parse(token string, h headers, c claims, verifier Verifier, opts ParseOptio
 	if c == nil {
 		c = &RegisteredClaims{}
 	}
-	if h.registeredHeaders() == nil {
-		return fmt.Errorf("%w: headers is nil", ErrTokenInvalid)
+	if isNil(h) || h.registeredHeaders() == nil {
+		return fmt.Errorf("%w: headers is nil", ErrArgumentInvalid)
 	}
-	if c.registeredClaims() == nil {
-		return fmt.Errorf("%w: claims is nil", ErrTokenInvalid)
+	if isNil(c) || c.registeredClaims() == nil {
+		return fmt.Errorf("%w: claims is nil", ErrArgumentInvalid)
 	}
 	if verifier == nil {
 		return fmt.Errorf("%w: verifier is nil", ErrArgumentInvalid)

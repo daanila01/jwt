@@ -35,10 +35,10 @@ func Sign(h headers, c claims, signer Signer, opts SignOptions) (string, error) 
 	if h == nil {
 		h = &RegisteredHeaders{}
 	}
-	if h.registeredHeaders() == nil {
+	if isNil(h) || h.registeredHeaders() == nil {
 		return "", fmt.Errorf("%w: headers is nil", ErrArgumentInvalid)
 	}
-	if c == nil || c.registeredClaims() == nil {
+	if isNil(c) || c.registeredClaims() == nil {
 		return "", fmt.Errorf("%w: claims is nil", ErrArgumentInvalid)
 	}
 	if signer == nil {
