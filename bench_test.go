@@ -1,10 +1,14 @@
 package jwt_test
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -128,7 +132,77 @@ func benchAlgorithms(b *testing.B) []benchAlgorithm {
 	}
 	out = append(out, benchAlgorithm{"EdDSA", edSigner, edVerifier})
 
+	for _, c := range []struct {
+		name  string
+		curve elliptic.Curve
+		newS  func(*ecdsa.PrivateKey) (*jwt.ECDSASigner, error)
+		newV  func(*ecdsa.PublicKey) (*jwt.ECDSAVerifier, error)
+	}{
+		{"ES256", elliptic.P256(), jwt.NewES256Signer, jwt.NewES256Verifier},
+		{"ES384", elliptic.P384(), jwt.NewES384Signer, jwt.NewES384Verifier},
+		{"ES512", elliptic.P521(), jwt.NewES512Signer, jwt.NewES512Verifier},
+	} {
+		key, err := ecdsa.GenerateKey(c.curve, rand.Reader)
+		if err != nil {
+			b.Fatalf("%s: GenerateKey() error = %v", c.name, err)
+		}
+		signer, err := c.newS(key)
+		if err != nil {
+			b.Fatalf("%s: signer: %v", c.name, err)
+		}
+		verifier, err := c.newV(&key.PublicKey)
+		if err != nil {
+			b.Fatalf("%s: verifier: %v", c.name, err)
+		}
+		out = append(out, benchAlgorithm{c.name, signer, verifier})
+	}
+
+	// One RSA key for all six: generating them is slow and the padding scheme
+	// is what differs, not the key.
+	rsaKey := benchRSAKey(b)
+	for _, r := range []struct {
+		name string
+		newS func(*rsa.PrivateKey) (*jwt.RSASigner, error)
+		newV func(*rsa.PublicKey) (*jwt.RSAVerifier, error)
+	}{
+		{"RS256", jwt.NewRS256Signer, jwt.NewRS256Verifier},
+		{"RS384", jwt.NewRS384Signer, jwt.NewRS384Verifier},
+		{"RS512", jwt.NewRS512Signer, jwt.NewRS512Verifier},
+		{"PS256", jwt.NewPS256Signer, jwt.NewPS256Verifier},
+		{"PS384", jwt.NewPS384Signer, jwt.NewPS384Verifier},
+		{"PS512", jwt.NewPS512Signer, jwt.NewPS512Verifier},
+	} {
+		signer, err := r.newS(rsaKey)
+		if err != nil {
+			b.Fatalf("%s: signer: %v", r.name, err)
+		}
+		verifier, err := r.newV(&rsaKey.PublicKey)
+		if err != nil {
+			b.Fatalf("%s: verifier: %v", r.name, err)
+		}
+		out = append(out, benchAlgorithm{r.name, signer, verifier})
+	}
+
 	return out
+}
+
+var (
+	benchRSAOnce sync.Once
+	benchRSA     *rsa.PrivateKey
+)
+
+func benchRSAKey(b *testing.B) *rsa.PrivateKey {
+	b.Helper()
+
+	var err error
+	benchRSAOnce.Do(func() {
+		benchRSA, err = rsa.GenerateKey(rand.Reader, jwt.MinRSAKeyBits)
+	})
+	if err != nil {
+		b.Fatalf("GenerateKey() error = %v", err)
+	}
+
+	return benchRSA
 }
 
 func BenchmarkSign(b *testing.B) {

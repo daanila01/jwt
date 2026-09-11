@@ -2,9 +2,13 @@ package jwt_test
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rsa"
 	"encoding/base64"
 	"errors"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -221,4 +225,178 @@ func TestRFC8037A4(t *testing.T) {
 			t.Fatalf("Verify() error = %v, want %v", err, jwt.ErrSignatureInvalid)
 		}
 	})
+}
+
+// jwkInt decodes one base64url big-endian integer from a JWK.
+func jwkInt(t *testing.T, s string) *big.Int {
+	t.Helper()
+
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatalf("decoding %q: %v", s, err)
+	}
+
+	return new(big.Int).SetBytes(b)
+}
+
+// The worked example from RFC 7515, Appendix A.2: RS256, with the key given as
+// a JWK, which is how keys travel between parties in practice.
+//
+// PKCS#1 v1.5 padding is deterministic, so this vector works in both
+// directions: the published signature verifies, and signing the same input
+// reproduces it byte for byte.
+func TestRFC7515A2(t *testing.T) {
+	const (
+		n = "ofgWCuLjybRlzo0tZWJjNiuSfb4p4fAkd_wWJcyQoTbji9k0l8W26mPddx" +
+			"HmfHQp-Vaw-4qPCJrcS2mJPMEzP1Pt0Bm4d4QlL-yRT-SFd2lZS-pCgNMs" +
+			"D1W_YpRPEwOWvG6b32690r2jZ47soMZo9wGzjb_7OMg0LOL-bSf63kpaSH" +
+			"SXndS5z5rexMdbBYUsLA9e-KXBdQOS-UTo7WTBEMa2R2CapHg665xsmtdV" +
+			"MTBQY4uDZlxvb3qCo5ZwKh9kG4LT6_I5IhlJH7aGhyxXFvUK-DWNmoudF8" +
+			"NAco9_h9iaGNj8q2ethFkMLs91kzk2PAcDTW9gb54h4FRWyuXpoQ"
+		e = "AQAB"
+		d = "Eq5xpGnNCivDflJsRQBXHx1hdR1k6Ulwe2JZD50LpXyWPEAeP88vLNO97I" +
+			"jlA7_GQ5sLKMgvfTeXZx9SE-7YwVol2NXOoAJe46sui395IW_GO-pWJ1O0" +
+			"BkTGoVEn2bKVRUCgu-GjBVaYLU6f3l9kJfFNS3E0QbVdxzubSu3Mkqzjkn" +
+			"439X0M_V51gfpRLI9JYanrC4D4qAdGcopV_0ZHHzQlBjudU2QvXt4ehNYT" +
+			"CBr6XCLQUShb1juUO1ZdiYoFaFQT5Tw8bGUl_x_jTj3ccPDVZFD9pIuhLh" +
+			"BOneufuBiB4cS98l2SR_RQyGWSeWjnczT0QU91p1DhOVRuOopznQ"
+		p = "4BzEEOtIpmVdVEZNCqS7baC4crd0pqnRH_5IB3jw3bcxGn6QLvnEtfdUdi" +
+			"YrqBdss1l58BQ3KhooKeQTa9AB0Hw_Py5PJdTJNPY8cQn7ouZ2KKDcmnPG" +
+			"BY5t7yLc1QlQ5xHdwW1VhvKn-nXqhJTBgIPgtldC-KDV5z-y2XDwGUc"
+		q = "uQPEfgmVtjL0Uyyx88GZFF1fOunH3-7cepKmtH4pxhtCoHqpWmT8YAmZxa" +
+			"ewHgHAjLYsp1ZSe7zFYHj7C6ul7TjeLQeZD_YwD66t62wDmpe_HlB-TnBA" +
+			"-njbglfIsRLtXlnDzQkv5dTltRJ11BKBBypeeF6689rjcJIDEz9RWdc"
+
+		token = "eyJhbGciOiJSUzI1NiJ9." +
+			"eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ." +
+			"cC4hiUPoj9Eetdgtv3hF80EGrhuB__dzERat0XF9g2VtQgr9PJbu3XOiZj5RZmh7" +
+			"AAuHIm4Bh-0Qc_lF5YKt_O8W2Fp5jujGbds9uJdbF9CUAr7t1dnZcAcQjbKBYNX4" +
+			"BAynRFdiuB--f_nZLgrnbyTyWzO75vRK5h6xBArLIARNPvkSjtQBMHlb1L07Qe7K" +
+			"0GarZRmB_eSN9383LcOLn6_dO--xi12jzDwusC-eOkHWEsqtFZESc6BfI7noOPqv" +
+			"hJ1phCnvWh6IeYI2w9QOYEUipUTI8np6LbgGY9Fs98rqVt5AXLIhWkWywlVmtVrB" +
+			"p0igcN_IoypGlUPQGe77Rw"
+	)
+
+	key := &rsa.PrivateKey{
+		PublicKey: rsa.PublicKey{N: jwkInt(t, n), E: int(jwkInt(t, e).Int64())},
+		D:         jwkInt(t, d),
+		Primes:    []*big.Int{jwkInt(t, p), jwkInt(t, q)},
+	}
+	key.Precompute()
+	if err := key.Validate(); err != nil {
+		t.Fatalf("the reference key does not validate: %v", err)
+	}
+
+	parts := strings.Split(token, ".")
+	signingInput := []byte(parts[0] + "." + parts[1])
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("decoding the reference signature: %v", err)
+	}
+
+	t.Run("the reference signature verifies", func(t *testing.T) {
+		v, err := jwt.NewRS256Verifier(&key.PublicKey)
+		if err != nil {
+			t.Fatalf("NewRS256Verifier() error = %v", err)
+		}
+		if err := v.Verify(signingInput, signature); err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+	})
+
+	t.Run("signing reproduces it byte for byte", func(t *testing.T) {
+		s, err := jwt.NewRS256Signer(key)
+		if err != nil {
+			t.Fatalf("NewRS256Signer() error = %v", err)
+		}
+		got, err := s.Sign(signingInput)
+		if err != nil {
+			t.Fatalf("Sign() error = %v", err)
+		}
+		if !bytes.Equal(got, signature) {
+			t.Error("the signature differs from the one published with the vector")
+		}
+	})
+}
+
+// The worked example from RFC 7515, Appendix A.3: ES256.
+//
+// ECDSA draws a fresh nonce for every signature, so this one can only be
+// checked in the verifying direction. Reproducing it is not possible and not
+// expected.
+func TestRFC7515A3(t *testing.T) {
+	const (
+		x     = "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU"
+		y     = "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+		token = "eyJhbGciOiJFUzI1NiJ9." +
+			"eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ." +
+			"DtEhU3ljbEg8L38VWAfUAqOyKAM6-Xx-F4GawxaepmXFCgfTjDxw5djxLa8ISlSApmWQxfKTUJqPP3-Kg6NU1Q"
+	)
+
+	pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: jwkInt(t, x), Y: jwkInt(t, y)}
+
+	parts := strings.Split(token, ".")
+	signingInput := []byte(parts[0] + "." + parts[1])
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("decoding the reference signature: %v", err)
+	}
+	if len(signature) != 64 {
+		t.Fatalf("the reference signature is %d bytes, want 64: two 32-byte halves", len(signature))
+	}
+
+	v, err := jwt.NewES256Verifier(pub)
+	if err != nil {
+		t.Fatalf("NewES256Verifier() error = %v", err)
+	}
+	if err := v.Verify(signingInput, signature); err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+
+	t.Run("a tampered signature is refused", func(t *testing.T) {
+		bad := append([]byte{}, signature...)
+		bad[0] ^= 0x01
+		if err := v.Verify(signingInput, bad); !errors.Is(err, jwt.ErrSignatureInvalid) {
+			t.Fatalf("Verify() error = %v, want %v", err, jwt.ErrSignatureInvalid)
+		}
+	})
+}
+
+// The worked example from RFC 7515, Appendix A.4: ES512, whose curve is P-521.
+//
+// This is the vector that catches the off-by-one nobody expects: a coordinate
+// is 66 bytes because 521 bits does not divide by eight, so the signature is
+// 132 rather than 128.
+func TestRFC7515A4(t *testing.T) {
+	const (
+		x = "AekpBQ8ST8a8VcfVOTNl353vSrDCLLJXmPk06wTjxrrjcBpXp5EOnYG_" +
+			"NjFZ6OvLFV1jSfS9tsz4qUxcWceqwQGk"
+		y = "ADSmRA43Z1DSNx_RvcLI87cdL07l6jQyyBXMoxVg_l2Th-x3S1WDhjDl" +
+			"y79ajL4Kkd0AZMaZmh9ubmf63e3kyMj2"
+		token = "eyJhbGciOiJFUzUxMiJ9." +
+			"UGF5bG9hZA." +
+			"AdwMgeerwtHoh-l192l60hp9wAHZFVJbLfD_UxMi70cwnZOYaRI1bKPWROc-mZZq" +
+			"wqT2SI-KGDKB34XO0aw_7XdtAG8GaSwFKdCAPZgoXD2YBJZCPEX3xKpRwcdOO8Kp" +
+			"EHwJjyqOgzDO7iKvU8vcnwNrmxYbSW9ERBXukOXolLzeO_Jn"
+	)
+
+	pub := &ecdsa.PublicKey{Curve: elliptic.P521(), X: jwkInt(t, x), Y: jwkInt(t, y)}
+
+	parts := strings.Split(token, ".")
+	signingInput := []byte(parts[0] + "." + parts[1])
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("decoding the reference signature: %v", err)
+	}
+	if len(signature) != 132 {
+		t.Fatalf("the reference signature is %d bytes, want 132: two 66-byte halves", len(signature))
+	}
+
+	v, err := jwt.NewES512Verifier(pub)
+	if err != nil {
+		t.Fatalf("NewES512Verifier() error = %v", err)
+	}
+	if err := v.Verify(signingInput, signature); err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
 }
