@@ -22,7 +22,7 @@ type testClaims struct {
 }
 
 // testSigner is the signer used by every case that does not bring its own.
-func testSigner(t *testing.T) *jwt.HS256 {
+func testSigner(t *testing.T) *jwt.HMAC {
 	t.Helper()
 
 	s, err := jwt.NewHS256([]byte("0123456789abcdef0123456789abcdef"))

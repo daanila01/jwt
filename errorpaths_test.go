@@ -70,6 +70,6 @@ func TestVerifierAlgorithmIsWhatIsCompared(t *testing.T) {
 }
 
 // mislabelled verifies correctly but names a different algorithm.
-type mislabelled struct{ *jwt.HS256 }
+type mislabelled struct{ *jwt.HMAC }
 
 func (mislabelled) Algorithm() string { return "RS256" }

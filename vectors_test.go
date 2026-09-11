@@ -22,7 +22,7 @@ const (
 		"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 )
 
-func rfc7515A1Verifier(t *testing.T) *jwt.HS256 {
+func rfc7515A1Verifier(t *testing.T) *jwt.HMAC {
 	t.Helper()
 
 	key, err := base64.RawURLEncoding.DecodeString(rfc7515A1Key)

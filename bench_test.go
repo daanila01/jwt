@@ -67,10 +67,10 @@ func benchPayloads() []struct {
 	}
 }
 
-func benchSigner(b *testing.B) *jwt.HS256 {
+func benchSigner(b *testing.B) *jwt.HMAC {
 	b.Helper()
 
-	s, err := jwt.NewHS256([]byte("0123456789abcdef0123456789abcdef"))
+	s, err := jwt.NewHS256(benchKey[:32])
 	if err != nil {
 		b.Fatalf("NewHS256() error = %v", err)
 	}
@@ -78,45 +78,84 @@ func benchSigner(b *testing.B) *jwt.HS256 {
 	return s
 }
 
+var benchKey = []byte("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+
+// benchAlgorithms is the one place the family is listed. Every benchmark below
+// loops over it, so a new algorithm joins the whole report by adding a line.
+func benchAlgorithms(b *testing.B) []struct {
+	name   string
+	signer *jwt.HMAC
+} {
+	b.Helper()
+
+	out := []struct {
+		name   string
+		signer *jwt.HMAC
+	}{}
+
+	for _, a := range []struct {
+		name string
+		new  func([]byte) (*jwt.HMAC, error)
+		size int
+	}{
+		{"HS256", jwt.NewHS256, 32},
+		{"HS384", jwt.NewHS384, 48},
+		{"HS512", jwt.NewHS512, 64},
+	} {
+		s, err := a.new(benchKey[:a.size])
+		if err != nil {
+			b.Fatalf("%s: constructor error = %v", a.name, err)
+		}
+		out = append(out, struct {
+			name   string
+			signer *jwt.HMAC
+		}{a.name, s})
+	}
+
+	return out
+}
+
 func BenchmarkSign(b *testing.B) {
-	s := benchSigner(b)
 	exp := time.Now().Add(time.Hour)
 
-	for _, tt := range benchPayloads() {
-		b.Run(tt.name, func(b *testing.B) {
-			b.ReportAllocs()
-			b.ResetTimer()
+	for _, a := range benchAlgorithms(b) {
+		for _, tt := range benchPayloads() {
+			b.Run(a.name+"/"+tt.name, func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
 
-			for i := 0; i < b.N; i++ {
-				// a fresh value each time: Sign writes into it, and reusing one
-				// would measure a second call that has less left to do
-				c := tt.claims
-				benchToken, benchErr = jwt.Sign(nil, &c, s, jwt.SignOptions{Expiration: exp})
-			}
-		})
+				for i := 0; i < b.N; i++ {
+					// a fresh value each time: Sign writes into it, and reusing
+					// one would measure a second call with less left to do
+					c := tt.claims
+					benchToken, benchErr = jwt.Sign(nil, &c, a.signer, jwt.SignOptions{Expiration: exp})
+				}
+			})
+		}
 	}
 }
 
 func BenchmarkParse(b *testing.B) {
-	s := benchSigner(b)
 	exp := time.Now().Add(time.Hour)
 
-	for _, tt := range benchPayloads() {
-		b.Run(tt.name, func(b *testing.B) {
-			c := tt.claims
-			token, err := jwt.Sign(nil, &c, s, jwt.SignOptions{Expiration: exp})
-			if err != nil {
-				b.Fatalf("Sign() error = %v", err)
-			}
+	for _, a := range benchAlgorithms(b) {
+		for _, tt := range benchPayloads() {
+			b.Run(a.name+"/"+tt.name, func(b *testing.B) {
+				c := tt.claims
+				token, err := jwt.Sign(nil, &c, a.signer, jwt.SignOptions{Expiration: exp})
+				if err != nil {
+					b.Fatalf("Sign() error = %v", err)
+				}
 
-			b.ReportAllocs()
-			b.ResetTimer()
+				b.ReportAllocs()
+				b.ResetTimer()
 
-			for i := 0; i < b.N; i++ {
-				var out benchClaims
-				benchErr = jwt.Parse(token, nil, &out, s, jwt.ParseOptions{})
-			}
-		})
+				for i := 0; i < b.N; i++ {
+					var out benchClaims
+					benchErr = jwt.Parse(token, nil, &out, a.signer, jwt.ParseOptions{})
+				}
+			})
+		}
 	}
 }
 
@@ -206,51 +245,70 @@ func BenchmarkParseParallel(b *testing.B) {
 // number that decides whether optimising the encoding is worth anything.
 var (
 	benchSignature []byte
-	benchSigner256 *jwt.HS256
+	benchSigner256 *jwt.HMAC
 )
 
-func BenchmarkHS256SignOnly(b *testing.B) {
-	s := benchSigner(b)
+func BenchmarkSignOnly(b *testing.B) {
 	input := []byte("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1MSJ9")
 
-	b.ReportAllocs()
-	b.ResetTimer()
+	for _, a := range benchAlgorithms(b) {
+		b.Run(a.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		benchSignature, benchErr = s.Sign(input)
+			for i := 0; i < b.N; i++ {
+				benchSignature, benchErr = a.signer.Sign(input)
+			}
+		})
 	}
 }
 
-func BenchmarkHS256VerifyOnly(b *testing.B) {
-	s := benchSigner(b)
+func BenchmarkVerifyOnly(b *testing.B) {
 	input := []byte("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1MSJ9")
 
-	sig, err := s.Sign(input)
-	if err != nil {
-		b.Fatalf("Sign() error = %v", err)
-	}
+	for _, a := range benchAlgorithms(b) {
+		b.Run(a.name, func(b *testing.B) {
+			sig, err := a.signer.Sign(input)
+			if err != nil {
+				b.Fatalf("Sign() error = %v", err)
+			}
 
-	b.ReportAllocs()
-	b.ResetTimer()
+			b.ReportAllocs()
+			b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		benchErr = s.Verify(input, sig)
+			for i := 0; i < b.N; i++ {
+				benchErr = a.signer.Verify(input, sig)
+			}
+		})
 	}
 }
 
-// BenchmarkNewHS256 covers the one-off cost of building a signer, which a
+// BenchmarkNewSigner covers the one-off cost of building a signer, which a
 // service pays at startup rather than per request. Worth a line so that nobody
 // is tempted to build one per call.
-func BenchmarkNewHS256(b *testing.B) {
-	key := []byte("0123456789abcdef0123456789abcdef")
+func BenchmarkNewSigner(b *testing.B) {
+	for _, a := range []struct {
+		name string
+		new  func([]byte) (*jwt.HMAC, error)
+		size int
+	}{
+		{"HS256", jwt.NewHS256, 32},
+		{"HS384", jwt.NewHS384, 48},
+		{"HS512", jwt.NewHS512, 64},
+	} {
+		b.Run(a.name, func(b *testing.B) {
+			key := benchKey[:a.size]
 
-	b.ReportAllocs()
-	b.ResetTimer()
+			b.ReportAllocs()
+			b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
-		// kept in a package-level variable: discarding it lets escape analysis
-		// delete the allocation and the benchmark reports a fiction
-		benchSigner256, benchErr = jwt.NewHS256(key)
+			for i := 0; i < b.N; i++ {
+				// kept in a package-level variable: discarding it lets escape
+				// analysis delete the allocation and the benchmark reports a
+				// fiction
+				benchSigner256, benchErr = a.new(key)
+			}
+		})
 	}
 }
 
