@@ -1,7 +1,11 @@
 package jwt_test
 
 import (
+	"bytes"
+	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,4 +143,82 @@ func TestGoldenToken(t *testing.T) {
 	if got != want {
 		t.Errorf("the encoding changed.\n got %s\nwant %s", got, want)
 	}
+}
+
+// The worked example from RFC 8037, Appendix A.4 and A.5: an Ed25519 key in JWK
+// form and the compact token it produces.
+//
+// EdDSA is deterministic, so unlike the ECDSA vectors this one can be checked
+// in both directions: the reference signature must verify, and signing the same
+// input must reproduce it byte for byte.
+//
+// The payload is the text "Example of Ed25519 signing" rather than a JSON
+// object, so Parse would rightly refuse it. The vector is used at the signer
+// and verifier instead, which is where the interoperability actually lives.
+const (
+	rfc8037Seed      = "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"
+	rfc8037PublicKey = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+
+	rfc8037Token = "eyJhbGciOiJFZERTQSJ9." +
+		"RXhhbXBsZSBvZiBFZDI1NTE5IHNpZ25pbmc." +
+		"hgyY0il_MGCjP0JzlnLWG1PPOt7-09PGcvMg3AIbQR6dWbhijcNR4ki4iylGjg5BhVsPt9g7sVvpAr_MuM0KAg"
+)
+
+func TestRFC8037A4(t *testing.T) {
+	seed, err := base64.RawURLEncoding.DecodeString(rfc8037Seed)
+	if err != nil {
+		t.Fatalf("decoding the reference seed: %v", err)
+	}
+	pub, err := base64.RawURLEncoding.DecodeString(rfc8037PublicKey)
+	if err != nil {
+		t.Fatalf("decoding the reference public key: %v", err)
+	}
+
+	// The JWK carries the 32-byte seed; the standard library wants the 64-byte
+	// expanded form, and derives the public half from it.
+	priv := ed25519.NewKeyFromSeed(seed)
+	if derived := priv.Public().(ed25519.PublicKey); !bytes.Equal(derived, pub) {
+		t.Fatalf("the public key derived from the seed does not match the one published with it")
+	}
+
+	parts := strings.Split(rfc8037Token, ".")
+	signingInput := []byte(parts[0] + "." + parts[1])
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("decoding the reference signature: %v", err)
+	}
+
+	t.Run("the reference signature verifies", func(t *testing.T) {
+		v, err := jwt.NewEdDSAVerifier(pub)
+		if err != nil {
+			t.Fatalf("NewEdDSAVerifier() error = %v", err)
+		}
+		if err := v.Verify(signingInput, signature); err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+	})
+
+	t.Run("signing reproduces it byte for byte", func(t *testing.T) {
+		s, err := jwt.NewEdDSASigner(priv)
+		if err != nil {
+			t.Fatalf("NewEdDSASigner() error = %v", err)
+		}
+		got, err := s.Sign(signingInput)
+		if err != nil {
+			t.Fatalf("Sign() error = %v", err)
+		}
+		if !bytes.Equal(got, signature) {
+			t.Errorf("Sign() = %x\nwant        %x", got, signature)
+		}
+	})
+
+	t.Run("a tampered payload is refused", func(t *testing.T) {
+		v, err := jwt.NewEdDSAVerifier(pub)
+		if err != nil {
+			t.Fatalf("NewEdDSAVerifier() error = %v", err)
+		}
+		if err := v.Verify([]byte(parts[0]+".RXhhbXBsZSBvZiBFZDI1NTE4IHNpZ25pbmc"), signature); !errors.Is(err, jwt.ErrSignatureInvalid) {
+			t.Fatalf("Verify() error = %v, want %v", err, jwt.ErrSignatureInvalid)
+		}
+	})
 }

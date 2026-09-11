@@ -1,6 +1,8 @@
 package jwt_test
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -80,18 +82,21 @@ func benchSigner(b *testing.B) *jwt.HMAC {
 
 var benchKey = []byte("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 
-// benchAlgorithms is the one place the family is listed. Every benchmark below
-// loops over it, so a new algorithm joins the whole report by adding a line.
-func benchAlgorithms(b *testing.B) []struct {
-	name   string
-	signer *jwt.HMAC
-} {
+// benchAlgorithm pairs a signer with the verifier that answers it. They are the
+// same object for HMAC, whose key is symmetric, and different objects for the
+// asymmetric families.
+type benchAlgorithm struct {
+	name     string
+	signer   jwt.Signer
+	verifier jwt.Verifier
+}
+
+// benchAlgorithms is the one place the list lives. Every benchmark below loops
+// over it, so a new algorithm joins the whole report by adding a line.
+func benchAlgorithms(b *testing.B) []benchAlgorithm {
 	b.Helper()
 
-	out := []struct {
-		name   string
-		signer *jwt.HMAC
-	}{}
+	out := []benchAlgorithm{}
 
 	for _, a := range []struct {
 		name string
@@ -106,11 +111,22 @@ func benchAlgorithms(b *testing.B) []struct {
 		if err != nil {
 			b.Fatalf("%s: constructor error = %v", a.name, err)
 		}
-		out = append(out, struct {
-			name   string
-			signer *jwt.HMAC
-		}{a.name, s})
+		out = append(out, benchAlgorithm{a.name, s, s})
 	}
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		b.Fatalf("GenerateKey() error = %v", err)
+	}
+	edSigner, err := jwt.NewEdDSASigner(priv)
+	if err != nil {
+		b.Fatalf("NewEdDSASigner() error = %v", err)
+	}
+	edVerifier, err := jwt.NewEdDSAVerifier(pub)
+	if err != nil {
+		b.Fatalf("NewEdDSAVerifier() error = %v", err)
+	}
+	out = append(out, benchAlgorithm{"EdDSA", edSigner, edVerifier})
 
 	return out
 }
@@ -152,7 +168,7 @@ func BenchmarkParse(b *testing.B) {
 
 				for i := 0; i < b.N; i++ {
 					var out benchClaims
-					benchErr = jwt.Parse(token, nil, &out, a.signer, jwt.ParseOptions{})
+					benchErr = jwt.Parse(token, nil, &out, a.verifier, jwt.ParseOptions{})
 				}
 			})
 		}
@@ -277,7 +293,7 @@ func BenchmarkVerifyOnly(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				benchErr = a.signer.Verify(input, sig)
+				benchErr = a.verifier.Verify(input, sig)
 			}
 		})
 	}
@@ -286,6 +302,9 @@ func BenchmarkVerifyOnly(b *testing.B) {
 // BenchmarkNewSigner covers the one-off cost of building a signer, which a
 // service pays at startup rather than per request. Worth a line so that nobody
 // is tempted to build one per call.
+//
+// EdDSA is left out: its constructor only checks a length, like these, and the
+// key generation that would dominate the number belongs to the caller.
 func BenchmarkNewSigner(b *testing.B) {
 	for _, a := range []struct {
 		name string
