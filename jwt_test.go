@@ -1,10 +1,15 @@
 package jwt_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/daanila01/jwt"
 )
@@ -34,6 +39,36 @@ func testSigner(t *testing.T) *jwt.HMAC {
 }
 
 func TestRoundTrip(t *testing.T) {
+	// One pair per asymmetric family, so that the custom-struct path is not
+	// only ever exercised with HMAC. The per-algorithm tests cover the
+	// algorithms themselves; what is unique here is a caller's own type with
+	// fields of its own on either side of the round trip.
+	edPub, edPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	edSigner, err := jwt.NewEdDSASigner(edPriv)
+	if err != nil {
+		t.Fatalf("NewEdDSASigner() error = %v", err)
+	}
+	edVerifier, err := jwt.NewEdDSAVerifier(edPub)
+	if err != nil {
+		t.Fatalf("NewEdDSAVerifier() error = %v", err)
+	}
+
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	ecSigner, err := jwt.NewES256Signer(ecKey)
+	if err != nil {
+		t.Fatalf("NewES256Signer() error = %v", err)
+	}
+	ecVerifier, err := jwt.NewES256Verifier(&ecKey.PublicKey)
+	if err != nil {
+		t.Fatalf("NewES256Verifier() error = %v", err)
+	}
+
 	tests := []struct {
 		name string
 
@@ -55,6 +90,51 @@ func TestRoundTrip(t *testing.T) {
 		{
 			name:   "signs and parses a token",
 			claims: &testClaims{UserID: "u1"},
+		},
+		{
+			name:    "carries a full claims set and a header of its own",
+			headers: &testHeaders{Service: "billing"},
+			claims: &testClaims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					ID:       "01J8Z5R2QK9V3T6M",
+					Issuer:   "auth.example.com",
+					Subject:  "6f1c8a52-4e7b-4a2f-9f7e-2b0d6a1c9e84",
+					Audience: jwt.Audience{"api.example.com", "billing.example.com"},
+				},
+				UserID: "6f1c8a52-4e7b-4a2f-9f7e-2b0d6a1c9e84",
+			},
+			signOptions: jwt.SignOptions{
+				Expiration: time.Now().Add(time.Hour),
+				NotBefore:  time.Now().Add(-time.Minute),
+				IssuedAt:   time.Now(),
+			},
+			parseOptions: jwt.ParseOptions{
+				ExpirationValidation: true,
+				NotBeforeValidation:  true,
+				ExpectedIssuer:       "auth.example.com",
+				ExpectedAudience:     "api.example.com",
+				ClockSkew:            30 * time.Second,
+			},
+		},
+		{
+			name:     "signs and parses with EdDSA",
+			claims:   &testClaims{UserID: "u1"},
+			signer:   edSigner,
+			verifier: edVerifier,
+		},
+		{
+			name:     "signs and parses with ES256",
+			headers:  &testHeaders{Service: "billing"},
+			claims:   &testClaims{UserID: "u1"},
+			signer:   ecSigner,
+			verifier: ecVerifier,
+		},
+		{
+			name:         "a verifier for another algorithm is refused",
+			claims:       &testClaims{UserID: "u1"},
+			signer:       edSigner,
+			verifier:     nil, // falls back to HMAC
+			wantParseErr: jwt.ErrTokenInvalid,
 		},
 		{
 			name:        "rejects nil claims",
