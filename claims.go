@@ -9,14 +9,21 @@ const (
 	claimNotBefore  = "nbf"
 )
 
-// RegisteredClaims holds the claims registered by RFC 7519 that this package
-// understands. Embed it by value in your own claims type and pass that type by
-// pointer; the methods have pointer receivers, and a value would be written to a
-// copy that is then discarded.
+// RegisteredClaims holds the seven claims RFC 7519 registers, with the JSON
+// tags they need and setters that take a [time.Time].
 //
-// Do not declare a field in the outer struct with a JSON name this type already
-// uses. The shallower field wins silently, this package keeps reading the
-// embedded zero value, and validation stops working without reporting anything.
+// Embedding it is a convenience, not a requirement: [Sign] and [Parse] accept
+// anything [encoding/json] handles, a map included. Embed it by value when you
+// want the standard fields alongside your own.
+//
+//	type Claims struct {
+//		jwt.RegisteredClaims
+//		UserID string `json:"user_id"`
+//	}
+//
+// Do not give the outer struct a field with a JSON name this type already uses.
+// The shallower one wins and the embedded one is never written, so the claim
+// would go out under your field and be looked for under this one.
 type RegisteredClaims struct {
 	// ID is the jti claim: an identifier unique among the tokens an issuer
 	// produces. This package neither generates nor checks it. It exists so that
@@ -49,8 +56,8 @@ type RegisteredClaims struct {
 	NotBefore int64 `json:"nbf,omitempty"`
 	// IssuedAt is the iat claim: seconds since the Unix epoch at which the token
 	// was produced. It never makes a token invalid on its own, so nothing here
-	// checks it. Set it through [SignOptions.IssuedAt] when you want to know a
-	// token's age, or to refuse every token issued before some moment.
+	// checks it. Set it with [RegisteredClaims.SetIssuedAt] when you want to
+	// know a token's age, or to refuse every token issued before some moment.
 	IssuedAt int64 `json:"iat,omitempty"`
 }
 

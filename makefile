@@ -1,3 +1,5 @@
+FUZZTIME ?= 30s
+
 # Colors for output messages
 RED=\033[0;31m
 GREEN=\033[0;32m
@@ -5,7 +7,7 @@ YELLOW=\033[0;33m
 # Reset color
 NC=\033[0m
 
-.PHONY: test race bench cover lint check clean
+.PHONY: test race bench cover lint check fuzz clean
 
 # Run the test suite with coverage; artifacts go to tmp/
 test:
@@ -31,6 +33,14 @@ bench:
 	@mkdir -p tmp
 	@go test -bench . -benchmem -benchtime 2s -run "^$$" ./... | tee tmp/bench.txt
 	@printf "$(GREEN)Written to tmp/bench.txt$(NC)\n"
+
+# Fuzz the parser. Inputs that break it land in testdata/fuzz and become
+# ordinary test cases from then on.
+fuzz:
+	@printf "$(YELLOW)Fuzzing the parser for $(FUZZTIME)...$(NC)\n"
+	@go test -run "^$$$$" -fuzz '^FuzzParse$$$$' -fuzztime $(FUZZTIME) .
+	@go test -run "^$$$$" -fuzz '^FuzzParseHeaderOnly$$$$' -fuzztime $(FUZZTIME) .
+	@printf "$(GREEN)No crashing input found.$(NC)\n"
 
 # Render the coverage profile as HTML
 cover: test

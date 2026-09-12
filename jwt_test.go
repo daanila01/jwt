@@ -26,7 +26,7 @@ type testClaims struct {
 }
 
 // testSigner is the signer used by every case that does not bring its own.
-func testSigner(t *testing.T) *jwt.HMAC {
+func testSigner(t testing.TB) *jwt.HMAC {
 	t.Helper()
 
 	s, err := jwt.NewHS256([]byte("0123456789abcdef0123456789abcdef"))
@@ -39,7 +39,7 @@ func testSigner(t *testing.T) *jwt.HMAC {
 
 // signHS256 builds a token from raw header and payload text, signed with the
 // test key, so that a test can produce shapes Sign itself would never emit.
-func signHS256(t *testing.T, header, payload string) string {
+func signHS256(t testing.TB, header, payload string) string {
 	t.Helper()
 
 	h := base64.RawURLEncoding.EncodeToString([]byte(header))
@@ -56,7 +56,7 @@ func signHS256(t *testing.T, header, payload string) string {
 // signSegments signs the two segments exactly as given, without encoding them,
 // so that a test can produce a token whose signature is valid over a segment
 // that is not valid base64url.
-func signSegments(t *testing.T, header, payload string) string {
+func signSegments(t testing.TB, header, payload string) string {
 	t.Helper()
 
 	sig, err := testSigner(t).Sign([]byte(header + "." + payload))
@@ -68,6 +68,11 @@ func signSegments(t *testing.T, header, payload string) string {
 }
 
 const testHeaderJSON = `{"typ":"JWT","alg":"HS256"}`
+
+// encodeSegment is the base64url a token segment uses: no padding, URL alphabet.
+func encodeSegment(s string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(s))
+}
 
 func TestRoundTrip(t *testing.T) {
 	// One pair per asymmetric family, so that the custom-struct path is not

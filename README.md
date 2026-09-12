@@ -98,14 +98,18 @@ case errors.Is(err, jwt.ErrTokenInvalid):     // 400, malformed input
 
 ## Options
 
-`SignOptions` and `ParseOptions` are plain structs passed by value. The zero value means
-defaults, so `jwt.ParseOptions{}` is a valid call.
+`ParseOptions` is a plain struct passed by value, and the zero value means defaults, so
+`jwt.ParseOptions{}` is a valid call. Both options are variadic, so they can be left out
+entirely. `SignOptions` carries nothing today: the header is yours to fill and the claims
+are your own value, so there is nothing left for an option to reach.
 
 | `ParseOptions` | Default | What it does |
 |---|---|---|
 | `MaxTokenSize` | 30 KB | rejected before any decoding, so a huge input costs nothing |
-| `ExpirationValidation` | off | check `exp` |
-| `NotBeforeValidation` | off | check `nbf` |
+| `ExpirationValidation` | off | check `exp`; a token without one is rejected |
+| `NotBeforeValidation` | off | check `nbf`; a token without one is rejected |
+| `ExpectedIssuer` | none | the `iss` the token must carry, compared byte for byte |
+| `ExpectedAudience` | none | this service's own name, which must appear in `aud` |
 | `Time` | now | the moment to validate against, for tests |
 | `ClockSkew` | 0 | tolerance for clocks that disagree between machines |
 
@@ -211,11 +215,15 @@ The known attacks against JWT libraries are closed by construction, not by confi
 
 ## Notes
 
-`Parse` does not zero the destination struct. `encoding/json` merges into it, so fields
-from a previous token survive. Pass a fresh value.
+Both destinations follow the `encoding/json` rule: pass a pointer, or there is nowhere to
+write. `Parse` does not clear them first, it merges, so a field left by an earlier token
+survives one that omits it. Pass a fresh value.
 
-`Signer` and `Verifier` implementations are safe for concurrent use. The claims and header
-values you pass in are not.
+`Signer` and `Verifier` implementations are safe for concurrent use: build one at startup
+and share it. The header and claims you pass in are not.
+
+Claim validation is opt-in, signature verification is not. `Parse` always checks the
+signature, and reads nothing from the claims until it holds.
 
 ## License
 

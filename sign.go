@@ -5,10 +5,13 @@ import (
 	"fmt"
 )
 
-// SignOptions configures a call to [Sign]. The zero value is valid and sets no
-// time claims at all.
-type SignOptions struct {
-}
+// SignOptions configures a call to [Sign]. It carries nothing yet: the header
+// is a map the caller fills in, and the claims are the caller's own value, so
+// there is nothing left for an option to reach.
+//
+// It exists so that a setting can be added later without changing the signature
+// of [Sign], which is why the parameter is variadic. Passing none is normal.
+type SignOptions struct{}
 
 // Sign encodes and signs a token, returning it in compact serialization,
 // base64url(header).base64url(claims).base64url(signature).

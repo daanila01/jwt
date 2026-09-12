@@ -51,6 +51,19 @@ jobs:
                   name: coverage-report
                   path: coverage.html
 
+    # A short fuzz run on every change. Thirty seconds finds nothing most days,
+    # which is the point: it is a tripwire, not a campaign. A serious hunt is
+    # `make fuzz FUZZTIME=10m` on a machine nobody is waiting on.
+    fuzz:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-go@v5
+              with:
+                  go-version: stable
+            - run: go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 30s .
+            - run: go test -run '^$' -fuzz '^FuzzParseHeaderOnly$' -fuzztime 30s .
+
     # Benchmarks are compiled and run once each, only to prove they still work.
     # Numbers from a shared runner vary too much between runs to be worth publishing.
     bench:
