@@ -42,6 +42,27 @@ type ParseOptions struct {
 	// in tests instead of sleeping.
 	Time time.Time
 
+	// ResolveVerifier picks the verifier from the token's header, for a service
+	// that holds more than one key. When it is set the verifier argument is
+	// ignored and may be nil.
+	//
+	// Choose by kid and nothing else. The algorithm must come from your own
+	// record of the key, never from the token's alg: letting the token pick how
+	// it is checked is the whole of the algorithm confusion attack. The alg in
+	// the header is still compared against whatever verifier is returned, so a
+	// resolver that obeys this rule keeps that protection intact and one that
+	// does not throws it away.
+	//
+	//	opts.ResolveVerifier = func(h map[string]any) (jwt.Verifier, error) {
+	//		kid, _ := h["kid"].(string)
+	//		key, ok := set.ByID(kid)
+	//		if !ok {
+	//			return nil, fmt.Errorf("unknown key %q", kid)
+	//		}
+	//		return key.Verifier()
+	//	}
+	ResolveVerifier func(header map[string]any) (Verifier, error)
+
 	// ClockSkew is how far the clocks of the issuer and this machine are allowed
 	// to disagree. Both windows widen by this much, so a token is accepted a
 	// little before nbf and a little after exp. Typical values are tens of
@@ -71,7 +92,13 @@ type ParseOptions struct {
 // Decoding merges and does not clear first, so a field left by an earlier token
 // survives one that omits it. Pass freshly zeroed values.
 func Parse(token string, h map[string]any, c any, verifier Verifier, options ...ParseOptions) error {
-	if verifier == nil {
+	opts := ParseOptions{}
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	prepareParseOptions(&opts)
+
+	if verifier == nil && opts.ResolveVerifier == nil {
 		return fmt.Errorf("%w: verifier is nil", ErrArgumentInvalid)
 	}
 	// A literal nil means "decode nothing"; a nil held inside an interface is a
@@ -82,12 +109,6 @@ func Parse(token string, h map[string]any, c any, verifier Verifier, options ...
 	if len(token) == 0 {
 		return fmt.Errorf("%w: token is empty", ErrTokenInvalid)
 	}
-
-	opts := ParseOptions{}
-	if len(options) > 0 {
-		opts = options[0]
-	}
-	prepareParseOptions(&opts)
 
 	if len(token) > opts.MaxTokenSize {
 		return fmt.Errorf("%w: token is too large, allowed %d bytes", ErrTokenInvalid, opts.MaxTokenSize)
@@ -113,6 +134,20 @@ func Parse(token string, h map[string]any, c any, verifier Verifier, options ...
 	if err := unmarshalBase64(segments[0], &header); err != nil {
 		return fmt.Errorf("%w: failed to unmarshal header: %w", ErrTokenInvalid, err)
 	}
+	// The key is chosen before the algorithm is compared, and by kid rather
+	// than by alg: the comparison below then still means something. Resolving by
+	// what the token says about itself would be handing the attacker the choice.
+	if opts.ResolveVerifier != nil {
+		resolved, err := opts.ResolveVerifier(header)
+		if err != nil {
+			return fmt.Errorf("%w: resolving the verifier: %w", ErrTokenInvalid, err)
+		}
+		if resolved == nil {
+			return fmt.Errorf("%w: the resolver returned no verifier", ErrArgumentInvalid)
+		}
+		verifier = resolved
+	}
+
 	if alg, ok := header[headerAlgorithm]; ok {
 		if alg == "" {
 			return fmt.Errorf("%w: algorithm is empty", ErrTokenInvalid)

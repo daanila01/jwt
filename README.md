@@ -207,6 +207,45 @@ Keys are rejected at construction rather than trusted at run time. An HMAC secre
 shorter than the hash output, an RSA modulus under 2048 bits, an ECDSA key on the wrong
 curve: each fails where you can see it, not on the first request in production.
 
+## Verifying someone else's tokens
+
+A service that checks tokens it did not issue faces two problems this package
+answers separately.
+
+The keys arrive as a JWK Set, not as PEM, which the standard library cannot read.
+The `jwk` subpackage does:
+
+```go
+set, err := jwk.ParseSet(document) // document came from wherever you fetch it
+```
+
+And the issuer holds more than one key at a time, because rotating means
+publishing the next one before retiring the last. The `kid` in a token's header
+says which:
+
+```go
+err = jwt.Parse(token, nil, &claims, nil, jwt.ParseOptions{
+	ResolveVerifier: func(h map[string]any) (jwt.Verifier, error) {
+		kid, _ := h["kid"].(string)
+		key, ok := set.ByID(kid)
+		if !ok {
+			return nil, fmt.Errorf("unknown key %q", kid)
+		}
+		return key.Verifier()
+	},
+})
+```
+
+Choose by `kid` and never by `alg`. The algorithm belongs to your record of the
+key, not to the token: letting the token pick how it is checked is the whole of
+the algorithm confusion attack. `Parse` still compares the header's `alg` against
+whatever verifier comes back, so a resolver that follows this rule keeps that
+protection and one that does not throws it away.
+
+Fetching, caching and refreshing the document are not here, and will not be. Where
+the bytes come from, how long they are trusted and what happens when the issuer is
+unreachable are decisions only your service can make.
+
 ## Security
 
 The known attacks against JWT libraries are closed by construction, not by configuration.
