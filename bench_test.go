@@ -48,12 +48,14 @@ func benchPayloads() []struct {
 		many[i] = "permission:resource:action:" + strings.Repeat("x", 16)
 	}
 
+	exp := time.Now().Add(time.Hour).Unix()
+
 	return []struct {
 		name   string
 		claims benchClaims
 	}{
 		{"small", benchClaims{
-			RegisteredClaims: jwt.RegisteredClaims{Subject: "u1"},
+			RegisteredClaims: jwt.RegisteredClaims{Subject: "u1", Expiration: exp},
 		}},
 		{"typical", benchClaims{
 			RegisteredClaims: jwt.RegisteredClaims{
@@ -66,7 +68,7 @@ func benchPayloads() []struct {
 			Roles:  []string{"user", "billing:read"},
 		}},
 		{"large", benchClaims{
-			RegisteredClaims: jwt.RegisteredClaims{Subject: "u1"},
+			RegisteredClaims: jwt.RegisteredClaims{Subject: "u1", Expiration: exp},
 			Roles:            many,
 			Scope:            strings.Repeat("openid profile email ", 20),
 		}},
@@ -206,8 +208,6 @@ func benchRSAKey(b *testing.B) *rsa.PrivateKey {
 }
 
 func BenchmarkSign(b *testing.B) {
-	exp := time.Now().Add(time.Hour)
-
 	for _, a := range benchAlgorithms(b) {
 		for _, tt := range benchPayloads() {
 			b.Run(a.name+"/"+tt.name, func(b *testing.B) {
@@ -218,7 +218,7 @@ func BenchmarkSign(b *testing.B) {
 					// a fresh value each time: Sign writes into it, and reusing
 					// one would measure a second call with less left to do
 					c := tt.claims
-					benchToken, benchErr = jwt.Sign(nil, &c, a.signer, jwt.SignOptions{Expiration: exp})
+					benchToken, benchErr = jwt.Sign(nil, &c, a.signer)
 				}
 			})
 		}
@@ -226,13 +226,11 @@ func BenchmarkSign(b *testing.B) {
 }
 
 func BenchmarkParse(b *testing.B) {
-	exp := time.Now().Add(time.Hour)
-
 	for _, a := range benchAlgorithms(b) {
 		for _, tt := range benchPayloads() {
 			b.Run(a.name+"/"+tt.name, func(b *testing.B) {
 				c := tt.claims
-				token, err := jwt.Sign(nil, &c, a.signer, jwt.SignOptions{Expiration: exp})
+				token, err := jwt.Sign(nil, &c, a.signer)
 				if err != nil {
 					b.Fatalf("Sign() error = %v", err)
 				}
@@ -256,10 +254,7 @@ func BenchmarkParseValidation(b *testing.B) {
 	s := benchSigner(b)
 
 	c := jwt.RegisteredClaims{Subject: "u1", Issuer: "auth", Audience: jwt.Audience{"api"}}
-	token, err := jwt.Sign(nil, &c, s, jwt.SignOptions{
-		Expiration: time.Now().Add(time.Hour),
-		NotBefore:  time.Now().Add(-time.Hour),
-	})
+	token, err := jwt.Sign(nil, &c, s)
 	if err != nil {
 		b.Fatalf("Sign() error = %v", err)
 	}
@@ -296,7 +291,6 @@ func BenchmarkParseValidation(b *testing.B) {
 // with more cores, something is contended.
 func BenchmarkSignParallel(b *testing.B) {
 	s := benchSigner(b)
-	exp := time.Now().Add(time.Hour)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -304,7 +298,7 @@ func BenchmarkSignParallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			c := jwt.RegisteredClaims{Subject: "u1"}
-			benchToken, benchErr = jwt.Sign(nil, &c, s, jwt.SignOptions{Expiration: exp})
+			benchToken, benchErr = jwt.Sign(nil, &c, s)
 		}
 	})
 }
@@ -313,7 +307,7 @@ func BenchmarkParseParallel(b *testing.B) {
 	s := benchSigner(b)
 
 	c := jwt.RegisteredClaims{Subject: "u1"}
-	token, err := jwt.Sign(nil, &c, s, jwt.SignOptions{Expiration: time.Now().Add(time.Hour)})
+	token, err := jwt.Sign(nil, &c, s)
 	if err != nil {
 		b.Fatalf("Sign() error = %v", err)
 	}

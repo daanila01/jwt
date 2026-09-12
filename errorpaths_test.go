@@ -28,28 +28,29 @@ type failingClaims struct {
 
 func (failingClaims) MarshalJSON() ([]byte, error) { return nil, errStub }
 
-type failingHeaders struct {
-	jwt.RegisteredHeaders
-}
+// failingValue is something a caller might put in the header map: the package
+// cannot know it will refuse to marshal, and the error has to travel.
+type failingValue struct{}
 
-func (failingHeaders) MarshalJSON() ([]byte, error) { return nil, errStub }
+func (failingValue) MarshalJSON() ([]byte, error) { return nil, errStub }
 
 func TestSignPropagatesSignerFailure(t *testing.T) {
-	_, err := jwt.Sign(nil, &jwt.RegisteredClaims{}, failingSigner{}, jwt.SignOptions{})
+	_, err := jwt.Sign(nil, &jwt.RegisteredClaims{}, failingSigner{})
 	if !errors.Is(err, errStub) {
 		t.Fatalf("Sign() error = %v, want it to wrap the signer's own error", err)
 	}
 }
 
 func TestSignPropagatesClaimsMarshalFailure(t *testing.T) {
-	_, err := jwt.Sign(nil, &failingClaims{}, testSigner(t), jwt.SignOptions{})
+	_, err := jwt.Sign(nil, &failingClaims{}, testSigner(t))
 	if !errors.Is(err, errStub) {
 		t.Fatalf("Sign() error = %v, want it to wrap the marshaller's own error", err)
 	}
 }
 
 func TestSignPropagatesHeaderMarshalFailure(t *testing.T) {
-	_, err := jwt.Sign(&failingHeaders{}, &jwt.RegisteredClaims{}, testSigner(t), jwt.SignOptions{})
+	h := map[string]any{"kid": failingValue{}}
+	_, err := jwt.Sign(h, &jwt.RegisteredClaims{}, testSigner(t))
 	if !errors.Is(err, errStub) {
 		t.Fatalf("Sign() error = %v, want it to wrap the marshaller's own error", err)
 	}
@@ -59,7 +60,7 @@ func TestSignPropagatesHeaderMarshalFailure(t *testing.T) {
 // from the other side: a verifier that claims a different algorithm must refuse
 // a token this package signed, even though the signature itself would check out.
 func TestVerifierAlgorithmIsWhatIsCompared(t *testing.T) {
-	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, testSigner(t), jwt.SignOptions{})
+	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, testSigner(t))
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}

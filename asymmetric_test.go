@@ -262,20 +262,18 @@ func TestAsymmetricVerify(t *testing.T) {
 func TestAsymmetricThroughSignAndParse(t *testing.T) {
 	for _, a := range asymmetricAlgorithms() {
 		t.Run(a.name, func(t *testing.T) {
-			token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, a.signer(t), jwt.SignOptions{})
+			token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, a.signer(t))
 			if err != nil {
 				t.Fatalf("Sign() error = %v", err)
 			}
 
-			var (
-				h jwt.RegisteredHeaders
-				c jwt.RegisteredClaims
-			)
+			h := make(map[string]any)
+			var c jwt.RegisteredClaims
 			if err := jwt.Parse(token, &h, &c, a.verifier(t), jwt.ParseOptions{}); err != nil {
 				t.Fatalf("Parse() error = %v", err)
 			}
-			if h.Algorithm != a.alg {
-				t.Errorf("alg = %q, want %q", h.Algorithm, a.alg)
+			if h["alg"] != a.alg {
+				t.Errorf("alg = %q, want %q", h["alg"], a.alg)
 			}
 			if c.Subject != "u1" {
 				t.Errorf("sub = %q, want u1", c.Subject)
@@ -292,7 +290,7 @@ func TestAsymmetricCrossAlgorithm(t *testing.T) {
 	all := asymmetricAlgorithms()
 
 	for _, signing := range all {
-		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, signing.signer(t), jwt.SignOptions{})
+		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, signing.signer(t))
 		if err != nil {
 			t.Fatalf("%s: Sign() error = %v", signing.name, err)
 		}
@@ -491,7 +489,7 @@ func hashFor(t *testing.T, s string) []byte {
 func TestAsymmetricTokenShape(t *testing.T) {
 	for _, a := range asymmetricAlgorithms() {
 		t.Run(a.name, func(t *testing.T) {
-			token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, a.signer(t), jwt.SignOptions{})
+			token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, a.signer(t))
 			if err != nil {
 				t.Fatalf("Sign() error = %v", err)
 			}

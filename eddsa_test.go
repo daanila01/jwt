@@ -220,21 +220,19 @@ func TestEdDSAVerify(t *testing.T) {
 func TestEdDSAThroughSignAndParse(t *testing.T) {
 	s, v := edPair(t)
 
-	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s, jwt.SignOptions{})
+	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}
 
-	var (
-		h jwt.RegisteredHeaders
-		c jwt.RegisteredClaims
-	)
+	h := make(map[string]any)
+	var c jwt.RegisteredClaims
 	if err := jwt.Parse(token, &h, &c, v, jwt.ParseOptions{}); err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if h.Algorithm != jwt.AlgorithmEdDSA {
-		t.Errorf("alg = %q, want %q", h.Algorithm, jwt.AlgorithmEdDSA)
+	if h["alg"] != jwt.AlgorithmEdDSA {
+		t.Errorf("alg = %q, want %q", h["alg"], jwt.AlgorithmEdDSA)
 	}
 	if c.Subject != "u1" {
 		t.Errorf("sub = %q, want u1", c.Subject)
@@ -253,7 +251,7 @@ func TestEdDSAAgainstOtherFamilies(t *testing.T) {
 	hmacSigner := testSigner(t)
 
 	t.Run("EdDSA token, HMAC verifier", func(t *testing.T) {
-		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, edSigner, jwt.SignOptions{})
+		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, edSigner)
 		if err != nil {
 			t.Fatalf("Sign() error = %v", err)
 		}
@@ -263,7 +261,7 @@ func TestEdDSAAgainstOtherFamilies(t *testing.T) {
 	})
 
 	t.Run("HMAC token, EdDSA verifier", func(t *testing.T) {
-		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, hmacSigner, jwt.SignOptions{})
+		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, hmacSigner)
 		if err != nil {
 			t.Fatalf("Sign() error = %v", err)
 		}

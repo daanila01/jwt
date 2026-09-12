@@ -1,8 +1,8 @@
 package jwt
 
 import (
+	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -62,26 +62,23 @@ type ParseOptions struct {
 //
 // Decoding merges into h and c and does not clear them first, so a field set by
 // an earlier token survives one that omits it. Pass freshly zeroed values.
-func Parse(token string, h headers, c claims, verifier Verifier, opts ParseOptions) error {
-	if h == nil {
-		h = &RegisteredHeaders{}
-	}
-	if c == nil {
-		c = &RegisteredClaims{}
-	}
-	if isNil(h) || h.registeredHeaders() == nil {
-		return fmt.Errorf("%w: headers is nil", ErrArgumentInvalid)
-	}
-	if isNil(c) || c.registeredClaims() == nil {
-		return fmt.Errorf("%w: claims is nil", ErrArgumentInvalid)
-	}
+func Parse(token string, h *map[string]any, c any, verifier Verifier, options ...ParseOptions) error {
 	if verifier == nil {
 		return fmt.Errorf("%w: verifier is nil", ErrArgumentInvalid)
+	}
+	// A literal nil means "decode nothing"; a nil held inside an interface is a
+	// caller's uninitialised variable, and writing into it is impossible.
+	if c != nil && isNil(c) {
+		return fmt.Errorf("%w: claims is nil", ErrArgumentInvalid)
 	}
 	if len(token) == 0 {
 		return fmt.Errorf("%w: token is empty", ErrTokenInvalid)
 	}
 
+	opts := ParseOptions{}
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	prepareParseOptions(&opts)
 
 	if len(token) > opts.MaxTokenSize {
@@ -98,8 +95,43 @@ func Parse(token string, h headers, c claims, verifier Verifier, opts ParseOptio
 		}
 	}
 
-	if err := parseHeaders(segments[0], h, verifier); err != nil {
-		return err
+	// The header is read either way, because alg lives in it. When the caller
+	// asked for it the same map is handed back; when they passed nil it is a
+	// throwaway. Unmarshalling the JSON literal null into a map pointer sets it
+	// to nil, so the result is read from a local and written back afterwards.
+	header := make(map[string]any)
+	if h != nil && *h != nil {
+		header = *h
+	}
+	if err := unmarshalBase64(segments[0], &header); err != nil {
+		return fmt.Errorf("%w: failed to unmarshal header: %w", ErrTokenInvalid, err)
+	}
+	if h != nil {
+		*h = header
+	}
+	if alg, ok := header[headerAlgorithm]; ok {
+		if alg == "" {
+			return fmt.Errorf("%w: algorithm is empty", ErrTokenInvalid)
+		}
+		if alg == "none" {
+			return fmt.Errorf("%w: algorithm is none", ErrTokenInvalid)
+		}
+		if alg != verifier.Algorithm() {
+			return fmt.Errorf("%w: algorithm mismatch: expected %s, got %s", ErrTokenInvalid, verifier.Algorithm(), alg)
+		}
+	} else {
+		return fmt.Errorf("%w: algorithm not found in header", ErrTokenInvalid)
+	}
+
+	// RFC 7519 requires the claims set to be a JSON object. Unmarshalling the
+	// literal null into a struct is a no-op rather than an error, so without
+	// this a token carrying null would parse into empty claims and pass.
+	cDec, err := base64.RawURLEncoding.DecodeString(segments[1])
+	if err != nil {
+		return fmt.Errorf("%w: failed to decode claims: %w", ErrTokenInvalid, err)
+	}
+	if len(bytes.TrimLeft(cDec, " \t\r\n")) == 0 || bytes.TrimLeft(cDec, " \t\r\n")[0] != '{' {
+		return fmt.Errorf("%w: claims is not a JSON object", ErrTokenInvalid)
 	}
 
 	sDec, err := base64.RawURLEncoding.DecodeString(segments[2])
@@ -110,8 +142,43 @@ func Parse(token string, h headers, c claims, verifier Verifier, opts ParseOptio
 		return err
 	}
 
-	if err := parseClaims(segments[1], c, opts); err != nil {
-		return err
+	if opts.ExpectedIssuer != "" || opts.ExpectedAudience != "" ||
+		opts.NotBeforeValidation || opts.ExpirationValidation {
+		var cl RegisteredClaims
+		if err := unmarshalBase64(segments[1], &cl); err != nil {
+			return fmt.Errorf("%w: failed to unmarshal claims: %w", ErrTokenInvalid, err)
+		}
+		if opts.ExpectedIssuer != "" && cl.Issuer != opts.ExpectedIssuer {
+			return fmt.Errorf("%w: issuer mismatch: expected %s, got %s", ErrTokenInvalid, opts.ExpectedIssuer, cl.Issuer)
+		}
+		if opts.ExpectedAudience != "" && !slices.Contains(cl.Audience, opts.ExpectedAudience) {
+			return fmt.Errorf("%w: audience mismatch: expected %s, got %s", ErrTokenInvalid, opts.ExpectedAudience, cl.Audience)
+		}
+		if opts.NotBeforeValidation {
+			if cl.NotBefore == 0 {
+				return fmt.Errorf("%w: %s", ErrClaimMissing, claimNotBefore)
+			}
+			// The moment nbf names is already valid, so only a later one fails.
+			if cl.NotBefore > opts.Time.Add(opts.ClockSkew).Unix() {
+				return ErrNotYetValid
+			}
+		}
+		if opts.ExpirationValidation {
+			if cl.Expiration == 0 {
+				return fmt.Errorf("%w: %s", ErrClaimMissing, claimExpiration)
+			}
+			// The moment exp names is already expired, which is why this is not
+			// symmetric with the check above.
+			if cl.Expiration <= opts.Time.Add(-opts.ClockSkew).Unix() {
+				return ErrExpired
+			}
+		}
+	}
+
+	if c != nil {
+		if err := unmarshalBase64(segments[1], c); err != nil {
+			return fmt.Errorf("%w: failed to unmarshal claims: %w", ErrTokenInvalid, err)
+		}
 	}
 
 	return nil
@@ -124,75 +191,4 @@ func prepareParseOptions(opts *ParseOptions) {
 	if opts.Time.IsZero() {
 		opts.Time = time.Now()
 	}
-}
-
-func parseHeaders(segment string, h headers, verifier Verifier) error {
-	hDec, err := base64.RawURLEncoding.DecodeString(segment)
-	if err != nil {
-		return fmt.Errorf("%w: failed to decode headers: %w", ErrTokenInvalid, err)
-	}
-	if hDec[0] != '{' {
-		return fmt.Errorf("%w: headers is not a JSON object", ErrTokenInvalid)
-	}
-	if err := json.Unmarshal(hDec, h); err != nil {
-		return fmt.Errorf("%w: failed to unmarshal headers: %w", ErrTokenInvalid, err)
-	}
-
-	alg := h.registeredHeaders().Algorithm
-	if alg == "" {
-		return fmt.Errorf("%w: algorithm not found in header", ErrTokenInvalid)
-	} else if alg == "none" {
-		return fmt.Errorf("%w: algorithm is none", ErrTokenInvalid)
-	} else if alg != verifier.Algorithm() {
-		return fmt.Errorf("%w: algorithm mismatch: expected %s, got %s", ErrTokenInvalid, verifier.Algorithm(), alg)
-	}
-
-	return nil
-}
-
-func parseClaims(segment string, c claims, opts ParseOptions) error {
-	cDec, err := base64.RawURLEncoding.DecodeString(segment)
-	if err != nil {
-		return fmt.Errorf("%w: failed to decode claims: %w", ErrTokenInvalid, err)
-	}
-	if cDec[0] != '{' {
-		return fmt.Errorf("%w: claims is not a JSON object", ErrTokenInvalid)
-	}
-	if err := json.Unmarshal(cDec, c); err != nil {
-		return fmt.Errorf("%w: failed to unmarshal claims: %w", ErrTokenInvalid, err)
-	}
-
-	if opts.ExpectedIssuer != "" {
-		if c.registeredClaims().Issuer != opts.ExpectedIssuer {
-			return fmt.Errorf("%w: issuer mismatch: expected %s, got %s", ErrTokenInvalid, opts.ExpectedIssuer, c.registeredClaims().Issuer)
-		}
-	}
-
-	if opts.ExpectedAudience != "" {
-		if !slices.Contains(c.registeredClaims().Audience, opts.ExpectedAudience) {
-			return fmt.Errorf("%w: audience mismatch: expected %s, got %s", ErrTokenInvalid, opts.ExpectedAudience, c.registeredClaims().Audience)
-		}
-	}
-
-	if opts.ExpirationValidation {
-		exp := c.registeredClaims().Expiration
-		if exp == 0 {
-			return fmt.Errorf("%w: %w: expiration not found", ErrTokenInvalid, ErrClaimMissing)
-		}
-		if !opts.Time.Add(-opts.ClockSkew).Before(time.Unix(exp, 0)) {
-			return ErrExpired
-		}
-	}
-
-	if opts.NotBeforeValidation {
-		nbf := c.registeredClaims().NotBefore
-		if nbf == 0 {
-			return fmt.Errorf("%w: %w: not before not found", ErrTokenInvalid, ErrClaimMissing)
-		}
-		if opts.Time.Add(opts.ClockSkew).Before(time.Unix(nbf, 0)) {
-			return ErrNotYetValid
-		}
-	}
-
-	return nil
 }

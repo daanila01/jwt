@@ -17,8 +17,14 @@ go get github.com/daanila01/jwt
 
 ## Quick start
 
-Claims are your own struct with `jwt.RegisteredClaims` embedded. There is no
-`map[string]any` anywhere in the API, so your fields keep their types.
+Claims are whatever `encoding/json` accepts: your own struct, or a map when the
+names are only known at run time. Embedding `jwt.RegisteredClaims` gives you the
+registered fields and setters that take a `time.Time`.
+
+The header is a `map[string]any`, because it holds three or four flat string
+keys and nothing more. Pass `nil` when you have nothing to add: `alg` is written
+from the signer either way, and overwrites whatever you put there, so a token
+cannot claim an algorithm other than the one that signed it.
 
 ```go
 package main
@@ -42,15 +48,16 @@ func main() {
 		panic(err)
 	}
 
-	token, err := jwt.Sign(nil, &Claims{UserID: "u1", Role: "admin"}, signer, jwt.SignOptions{
-		Expiration: time.Now().Add(15 * time.Minute),
-	})
+	claims := Claims{UserID: "u1", Role: "admin"}
+	claims.SetExpiration(time.Now().Add(15 * time.Minute))
+
+	token, err := jwt.Sign(nil, &claims, signer)
 	if err != nil {
 		panic(err)
 	}
 
-	var claims Claims
-	err = jwt.Parse(token, nil, &claims, signer, jwt.ParseOptions{
+	var parsed Claims
+	err = jwt.Parse(token, nil, &parsed, signer, jwt.ParseOptions{
 		ExpirationValidation: true,
 		ClockSkew:            30 * time.Second,
 	})
@@ -58,12 +65,13 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println(claims.UserID, claims.Role)
+	fmt.Println(parsed.UserID, parsed.Role)
 }
 ```
 
-Pass `nil` for the header when you do not need to read it. Pass `nil` for the claims too
-when you only want to know whether the token is authentic.
+Pass `nil` for the header when you do not need to read it, and `nil` for the claims when
+you only want to know whether the token is authentic. Both destinations follow the
+`encoding/json` rule: give a pointer, or there is nowhere to write.
 
 ## Errors
 

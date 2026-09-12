@@ -1,10 +1,13 @@
 package jwt
 
-// claims is satisfied by any type that embeds [RegisteredClaims]. The method is
-// unexported, so no type outside this package can implement it another way.
-type claims interface {
-	registeredClaims() *RegisteredClaims
-}
+import "time"
+
+// The registered claim names this package looks at by itself. They appear in
+// errors, so that "which claim is missing" is answerable without parsing text.
+const (
+	claimExpiration = "exp"
+	claimNotBefore  = "nbf"
+)
 
 // RegisteredClaims holds the claims registered by RFC 7519 that this package
 // understands. Embed it by value in your own claims type and pass that type by
@@ -51,6 +54,30 @@ type RegisteredClaims struct {
 	IssuedAt int64 `json:"iat,omitempty"`
 }
 
-func (c *RegisteredClaims) registeredClaims() *RegisteredClaims {
-	return c
+func (c *RegisteredClaims) SetID(id string) {
+	c.ID = id
+}
+
+func (c *RegisteredClaims) SetAudience(aud Audience) {
+	c.Audience = aud
+}
+
+func (c *RegisteredClaims) SetIssuer(iss string) {
+	c.Issuer = iss
+}
+
+func (c *RegisteredClaims) SetSubject(sub string) {
+	c.Subject = sub
+}
+
+func (c *RegisteredClaims) SetExpiration(exp time.Time) {
+	c.Expiration = exp.Unix()
+}
+
+func (c *RegisteredClaims) SetNotBefore(nbf time.Time) {
+	c.NotBefore = nbf.Unix()
+}
+
+func (c *RegisteredClaims) SetIssuedAt(iat time.Time) {
+	c.IssuedAt = iat.Unix()
 }

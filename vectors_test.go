@@ -55,10 +55,8 @@ func rfc7515A1Verifier(t *testing.T) *jwt.HMAC {
 func TestRFC7515A1(t *testing.T) {
 	v := rfc7515A1Verifier(t)
 
-	var (
-		h jwt.RegisteredHeaders
-		c jwt.RegisteredClaims
-	)
+	h := make(map[string]any)
+	var c jwt.RegisteredClaims
 	err := jwt.Parse(rfc7515A1Token, &h, &c, v, jwt.ParseOptions{
 		ExpirationValidation: true,
 		Time:                 time.Unix(1_300_819_379, 0),
@@ -67,11 +65,11 @@ func TestRFC7515A1(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	if h.Algorithm != "HS256" {
-		t.Errorf("alg = %q, want HS256", h.Algorithm)
+	if h["alg"] != "HS256" {
+		t.Errorf("alg = %q, want HS256", h["alg"])
 	}
-	if h.Type != "JWT" {
-		t.Errorf("typ = %q, want JWT", h.Type)
+	if h["typ"] != "JWT" {
+		t.Errorf("typ = %q, want JWT", h["typ"])
 	}
 	if c.Issuer != "joe" {
 		t.Errorf("iss = %q, want joe", c.Issuer)
@@ -126,20 +124,19 @@ func TestRFC7515A5Unsecured(t *testing.T) {
 // that a refactor did not silently change the encoding: field order, the base64
 // alphabet, padding, the separator.
 func TestGoldenToken(t *testing.T) {
-	const want = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9." +
+	const want = "eyJhbGciOiJIUzI1NiJ9." +
 		"eyJqdGkiOiJ0b2tlbi0xIiwiYXVkIjpbImFwaSJdLCJpc3MiOiJhdXRoIiwic3ViIjoidTEiLCJleHAiOjE3MDAwMDAwNjAsIm5iZiI6MTY5OTk5OTk0MCwiaWF0IjoxNzAwMDAwMDAwfQ." +
-		"4h2LXci54KgBX4au9o1W0fOcIlDuvl4oh9SylkfDfr8"
+		"JJh_22I4G0er6s2On3J_xgDjJY9a5fk5hVDMpRbQ8oM"
 
 	got, err := jwt.Sign(nil, &jwt.RegisteredClaims{
-		ID:       "token-1",
-		Audience: jwt.Audience{"api"},
-		Issuer:   "auth",
-		Subject:  "u1",
-	}, testSigner(t), jwt.SignOptions{
-		Expiration: time.Unix(1_700_000_060, 0),
-		NotBefore:  time.Unix(1_699_999_940, 0),
-		IssuedAt:   time.Unix(1_700_000_000, 0),
-	})
+		ID:         "token-1",
+		Audience:   jwt.Audience{"api"},
+		Issuer:     "auth",
+		Subject:    "u1",
+		Expiration: 1_700_000_060,
+		NotBefore:  1_699_999_940,
+		IssuedAt:   1_700_000_000,
+	}, testSigner(t))
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}

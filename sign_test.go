@@ -16,59 +16,59 @@ func TestSignArguments(t *testing.T) {
 	s := testSigner(t)
 
 	t.Run("nil claims", func(t *testing.T) {
-		if _, err := jwt.Sign(nil, nil, s, jwt.SignOptions{}); !errors.Is(err, jwt.ErrArgumentInvalid) {
+		if _, err := jwt.Sign(nil, nil, s); !errors.Is(err, jwt.ErrArgumentInvalid) {
 			t.Fatalf("Sign() error = %v, want %v", err, jwt.ErrArgumentInvalid)
 		}
 	})
 
 	t.Run("nil signer", func(t *testing.T) {
-		if _, err := jwt.Sign(nil, &jwt.RegisteredClaims{}, nil, jwt.SignOptions{}); !errors.Is(err, jwt.ErrArgumentInvalid) {
+		if _, err := jwt.Sign(nil, &jwt.RegisteredClaims{}, nil); !errors.Is(err, jwt.ErrArgumentInvalid) {
 			t.Fatalf("Sign() error = %v, want %v", err, jwt.ErrArgumentInvalid)
 		}
 	})
 
+	// A typed nil is not equal to nil, so the plain check misses it and the
+	// value marshals to the JSON literal null: a token this package issues and
+	// then refuses to parse.
 	t.Run("nil pointer to the registered claims", func(t *testing.T) {
 		var c *jwt.RegisteredClaims
-		if _, err := jwt.Sign(nil, c, s, jwt.SignOptions{}); !errors.Is(err, jwt.ErrArgumentInvalid) {
+		if _, err := jwt.Sign(nil, c, s); !errors.Is(err, jwt.ErrArgumentInvalid) {
 			t.Fatalf("Sign() error = %v, want %v", err, jwt.ErrArgumentInvalid)
 		}
 	})
 
-	t.Run("nil pointer to the registered headers", func(t *testing.T) {
-		var h *jwt.RegisteredHeaders
-		if _, err := jwt.Sign(h, &jwt.RegisteredClaims{}, s, jwt.SignOptions{}); !errors.Is(err, jwt.ErrArgumentInvalid) {
+	t.Run("nil pointer to a caller's own type", func(t *testing.T) {
+		var c *testClaims
+		if _, err := jwt.Sign(nil, c, s); !errors.Is(err, jwt.ErrArgumentInvalid) {
 			t.Fatalf("Sign() error = %v, want %v", err, jwt.ErrArgumentInvalid)
 		}
 	})
 
-	t.Run("nil header falls back to the registered set", func(t *testing.T) {
-		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s, jwt.SignOptions{})
+	t.Run("nil header is built by the package", func(t *testing.T) {
+		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s)
 		if err != nil {
 			t.Fatalf("Sign() error = %v", err)
 		}
-		if got := decodeSegment(t, token, 0); got != `{"typ":"JWT","alg":"HS256"}` {
-			t.Errorf("header = %s, want the registered defaults", got)
+		if got := decodeSegment(t, token, 0); got != `{"alg":"HS256"}` {
+			t.Errorf("header = %s, want only what the package writes", got)
 		}
 	})
 }
 
-// TestSignWritesTheHeader pins the two header parameters the caller does not
-// control. The algorithm comes from the signer and overwrites anything the
-// caller put there, which is what makes a mismatch between the declared and the
-// actual algorithm impossible to construct.
+// TestSignWritesTheHeader pins the parameters the caller does not control. The
+// algorithm comes from the signer and overwrites whatever the caller put there,
+// which is what makes a mismatch between the declared and the actual algorithm
+// impossible to construct.
 func TestSignWritesTheHeader(t *testing.T) {
-	type header struct {
-		jwt.RegisteredHeaders
-		Service string `json:"svc,omitempty"`
+	s := testSigner(t)
+	h := map[string]any{
+		"alg": "none",
+		"typ": "nonsense",
+		"kid": "2024-06",
+		"svc": "billing",
 	}
 
-	s := testSigner(t)
-	h := header{Service: "billing"}
-	h.Algorithm = "none"
-	h.Type = "nonsense"
-	h.KeyID = "2024-06"
-
-	token, err := jwt.Sign(&h, &jwt.RegisteredClaims{}, s, jwt.SignOptions{})
+	token, err := jwt.Sign(h, &jwt.RegisteredClaims{}, s)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}
@@ -81,8 +81,10 @@ func TestSignWritesTheHeader(t *testing.T) {
 	if got["alg"] != "HS256" {
 		t.Errorf("alg = %v, want HS256: the signer decides, not the caller", got["alg"])
 	}
-	if got["typ"] != "JWT" {
-		t.Errorf("typ = %v, want JWT", got["typ"])
+	// typ is the caller's to set: the package leaves whatever is there alone,
+	// because unlike alg it says nothing about how the token was signed.
+	if got["typ"] != "nonsense" {
+		t.Errorf("typ = %v, want it carried through untouched", got["typ"])
 	}
 	if got["kid"] != "2024-06" {
 		t.Errorf("kid = %v, want it carried through untouched", got["kid"])
@@ -91,13 +93,17 @@ func TestSignWritesTheHeader(t *testing.T) {
 		t.Errorf("svc = %v, want it carried through untouched", got["svc"])
 	}
 
-	if h.Algorithm != "HS256" {
-		t.Errorf("Sign is documented to write into the caller's value, alg = %q", h.Algorithm)
+	if h["alg"] != "HS256" {
+		t.Errorf("Sign writes into the caller's map, alg = %v", h["alg"])
 	}
 }
 
-// TestSignWritesTimeClaims checks that each option lands in the payload, and
-// that an unset one writes nothing at all rather than a zero.
+// TestSignWritesTimeClaims checks that the claims a caller sets reach the
+// payload, and that unset ones are omitted rather than written as zeroes.
+//
+// Sign does not fill these in: claims belong to the caller now, and the setters
+// on RegisteredClaims are what keep seconds from being confused with anything
+// else.
 func TestSignWritesTimeClaims(t *testing.T) {
 	s := testSigner(t)
 	exp := time.Unix(1_700_000_060, 0)
@@ -105,11 +111,12 @@ func TestSignWritesTimeClaims(t *testing.T) {
 	iat := time.Unix(1_700_000_000, 0)
 
 	t.Run("all three set", func(t *testing.T) {
-		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{}, s, jwt.SignOptions{
-			Expiration: exp,
-			NotBefore:  nbf,
-			IssuedAt:   iat,
-		})
+		var c jwt.RegisteredClaims
+		c.SetExpiration(exp)
+		c.SetNotBefore(nbf)
+		c.SetIssuedAt(iat)
+
+		token, err := jwt.Sign(nil, &c, s)
 		if err != nil {
 			t.Fatalf("Sign() error = %v", err)
 		}
@@ -126,12 +133,22 @@ func TestSignWritesTimeClaims(t *testing.T) {
 	})
 
 	t.Run("none set", func(t *testing.T) {
-		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s, jwt.SignOptions{})
+		token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s)
 		if err != nil {
 			t.Fatalf("Sign() error = %v", err)
 		}
 		if got := decodeSegment(t, token, 1); got != `{"sub":"u1"}` {
 			t.Errorf("payload = %s, want only the claim that was set", got)
+		}
+	})
+
+	t.Run("a map of claims works too", func(t *testing.T) {
+		token, err := jwt.Sign(nil, map[string]any{"sub": "u1", "tenant": "acme"}, s)
+		if err != nil {
+			t.Fatalf("Sign() error = %v", err)
+		}
+		if got := decodeSegment(t, token, 1); got != `{"sub":"u1","tenant":"acme"}` {
+			t.Errorf("payload = %s", got)
 		}
 	})
 }
@@ -141,13 +158,13 @@ func TestSignWritesTimeClaims(t *testing.T) {
 // would not if Sign read the clock on its own.
 func TestSignIsDeterministic(t *testing.T) {
 	s := testSigner(t)
-	opts := jwt.SignOptions{Expiration: time.Unix(1_700_000_060, 0)}
+	claims := jwt.RegisteredClaims{Subject: "u1", Expiration: 1_700_000_060}
 
-	first, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s, opts)
+	first, err := jwt.Sign(nil, &claims, s)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}
-	second, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s, opts)
+	second, err := jwt.Sign(nil, &claims, s)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}
@@ -161,7 +178,7 @@ func TestSignIsDeterministic(t *testing.T) {
 func TestSignShape(t *testing.T) {
 	s := testSigner(t)
 
-	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s, jwt.SignOptions{})
+	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}

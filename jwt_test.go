@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -14,13 +15,11 @@ import (
 	"github.com/daanila01/jwt"
 )
 
-// testHeaders and testClaims stand in for what a caller of this package writes:
-// their own type with the registered set embedded.
-type testHeaders struct {
-	jwt.RegisteredHeaders
-	Service string `json:"svc,omitempty"`
-}
-
+// testClaims stands in for what a caller of this package writes: their own type,
+// with the registered set embedded when they want the standard fields.
+//
+// Headers have no matching type. They are a small, flat, string-keyed thing, so
+// the package takes a map and a test builds one the way an application would.
 type testClaims struct {
 	jwt.RegisteredClaims
 	UserID string `json:"user_id,omitempty"`
@@ -37,6 +36,38 @@ func testSigner(t *testing.T) *jwt.HMAC {
 
 	return s
 }
+
+// signHS256 builds a token from raw header and payload text, signed with the
+// test key, so that a test can produce shapes Sign itself would never emit.
+func signHS256(t *testing.T, header, payload string) string {
+	t.Helper()
+
+	h := base64.RawURLEncoding.EncodeToString([]byte(header))
+	p := base64.RawURLEncoding.EncodeToString([]byte(payload))
+
+	sig, err := testSigner(t).Sign([]byte(h + "." + p))
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	return h + "." + p + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+// signSegments signs the two segments exactly as given, without encoding them,
+// so that a test can produce a token whose signature is valid over a segment
+// that is not valid base64url.
+func signSegments(t *testing.T, header, payload string) string {
+	t.Helper()
+
+	sig, err := testSigner(t).Sign([]byte(header + "." + payload))
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	return header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+const testHeaderJSON = `{"typ":"JWT","alg":"HS256"}`
 
 func TestRoundTrip(t *testing.T) {
 	// One pair per asymmetric family, so that the custom-struct path is not
@@ -69,15 +100,16 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("NewES256Verifier() error = %v", err)
 	}
 
+	now := time.Unix(1_700_000_000, 0)
+
 	tests := []struct {
 		name string
 
-		// A nil headers or claims is passed to Sign and Parse as a literal nil,
-		// which the package treats as "build a throwaway registered set".
-		headers *testHeaders
-		claims  *testClaims
+		// A nil header is passed through as a literal nil, which the package
+		// treats as "build one for me".
+		header map[string]any
+		claims *testClaims
 
-		signOptions  jwt.SignOptions
 		parseOptions jwt.ParseOptions
 
 		// Left nil, these fall back to testSigner.
@@ -92,27 +124,26 @@ func TestRoundTrip(t *testing.T) {
 			claims: &testClaims{UserID: "u1"},
 		},
 		{
-			name:    "carries a full claims set and a header of its own",
-			headers: &testHeaders{Service: "billing"},
+			name:   "carries a full claims set and a header of its own",
+			header: map[string]any{"kid": "2024-06", "svc": "billing"},
 			claims: &testClaims{
 				RegisteredClaims: jwt.RegisteredClaims{
-					ID:       "01J8Z5R2QK9V3T6M",
-					Issuer:   "auth.example.com",
-					Subject:  "6f1c8a52-4e7b-4a2f-9f7e-2b0d6a1c9e84",
-					Audience: jwt.Audience{"api.example.com", "billing.example.com"},
+					ID:         "01J8Z5R2QK9V3T6M",
+					Issuer:     "auth.example.com",
+					Subject:    "6f1c8a52-4e7b-4a2f-9f7e-2b0d6a1c9e84",
+					Audience:   jwt.Audience{"api.example.com", "billing.example.com"},
+					Expiration: now.Add(time.Hour).Unix(),
+					NotBefore:  now.Add(-time.Minute).Unix(),
+					IssuedAt:   now.Unix(),
 				},
 				UserID: "6f1c8a52-4e7b-4a2f-9f7e-2b0d6a1c9e84",
-			},
-			signOptions: jwt.SignOptions{
-				Expiration: time.Now().Add(time.Hour),
-				NotBefore:  time.Now().Add(-time.Minute),
-				IssuedAt:   time.Now(),
 			},
 			parseOptions: jwt.ParseOptions{
 				ExpirationValidation: true,
 				NotBeforeValidation:  true,
 				ExpectedIssuer:       "auth.example.com",
 				ExpectedAudience:     "api.example.com",
+				Time:                 now,
 				ClockSkew:            30 * time.Second,
 			},
 		},
@@ -124,7 +155,7 @@ func TestRoundTrip(t *testing.T) {
 		},
 		{
 			name:     "signs and parses with ES256",
-			headers:  &testHeaders{Service: "billing"},
+			header:   map[string]any{"kid": "2024-06"},
 			claims:   &testClaims{UserID: "u1"},
 			signer:   ecSigner,
 			verifier: ecVerifier,
@@ -155,12 +186,11 @@ func TestRoundTrip(t *testing.T) {
 				}
 			}
 
-			// Copy, so that Sign writing alg, typ and the time claims does not
-			// mutate the table itself.
-			var inHeaders *testHeaders
-			if tt.headers != nil {
-				h := *tt.headers
-				inHeaders = &h
+			// Copies, so that Sign writing alg into the header and the table
+			// being reused do not interfere.
+			var inHeader map[string]any
+			if tt.header != nil {
+				inHeader = maps.Clone(tt.header)
 			}
 			var inClaims *testClaims
 			if tt.claims != nil {
@@ -168,23 +198,16 @@ func TestRoundTrip(t *testing.T) {
 				inClaims = &c
 			}
 
-			// The interfaces Sign and Parse take are unexported on purpose, so a
-			// test cannot hold a variable of one. Passing a nil *testClaims is
-			// not the same as passing nil: the interface would carry a type and
-			// compare unequal to nil. Hence the branches.
+			// Passing a nil *testClaims is not the same as passing nil: the
+			// interface would carry a type. Hence the branch.
 			var (
 				token string
 				err   error
 			)
-			switch {
-			case inHeaders != nil && inClaims != nil:
-				token, err = jwt.Sign(inHeaders, inClaims, signer, tt.signOptions)
-			case inHeaders != nil:
-				token, err = jwt.Sign(inHeaders, nil, signer, tt.signOptions)
-			case inClaims != nil:
-				token, err = jwt.Sign(nil, inClaims, signer, tt.signOptions)
-			default:
-				token, err = jwt.Sign(nil, nil, signer, tt.signOptions)
+			if inClaims != nil {
+				token, err = jwt.Sign(inHeader, inClaims, signer)
+			} else {
+				token, err = jwt.Sign(inHeader, nil, signer)
 			}
 
 			if !errors.Is(err, tt.wantSignErr) {
@@ -202,41 +225,25 @@ func TestRoundTrip(t *testing.T) {
 				t.Fatalf("Parse() with nil destinations error = %v, want %v", err, tt.wantParseErr)
 			}
 
-			var outHeaders testHeaders
+			outHeader := make(map[string]any)
 			var outClaims testClaims
-			if err := jwt.Parse(token, &outHeaders, &outClaims, verifier, tt.parseOptions); !errors.Is(err, tt.wantParseErr) {
+			if err := jwt.Parse(token, &outHeader, &outClaims, verifier, tt.parseOptions); !errors.Is(err, tt.wantParseErr) {
 				t.Fatalf("Parse() error = %v, want %v", err, tt.wantParseErr)
 			}
 			if tt.wantParseErr != nil {
 				return
 			}
 
-			if outHeaders.Algorithm != signer.Algorithm() {
-				t.Errorf("header alg = %q, want %q", outHeaders.Algorithm, signer.Algorithm())
+			if got := outHeader["alg"]; got != signer.Algorithm() {
+				t.Errorf("header alg = %v, want %q", got, signer.Algorithm())
 			}
-			if inHeaders != nil {
-				if outHeaders.Service != inHeaders.Service {
-					t.Errorf("header svc = %q, want %q", outHeaders.Service, inHeaders.Service)
+			for k, want := range inHeader {
+				if k == "alg" {
+					continue // written by Sign, checked above
 				}
-				if outHeaders.Type != inHeaders.Type {
-					t.Errorf("header typ = %q, want %q", outHeaders.Type, inHeaders.Type)
+				if got := outHeader[k]; got != want {
+					t.Errorf("header %q = %v, want %v", k, got, want)
 				}
-				if outHeaders.KeyID != inHeaders.KeyID {
-					t.Errorf("header kid = %q, want %q", outHeaders.KeyID, inHeaders.KeyID)
-				}
-			}
-
-			// Compared against the options rather than against the input, so a
-			// Sign that stopped reading them would not slip through by leaving
-			// both sides zero.
-			if !tt.signOptions.Expiration.IsZero() && outClaims.Expiration != tt.signOptions.Expiration.Unix() {
-				t.Errorf("claim exp = %d, want %d", outClaims.Expiration, tt.signOptions.Expiration.Unix())
-			}
-			if !tt.signOptions.NotBefore.IsZero() && outClaims.NotBefore != tt.signOptions.NotBefore.Unix() {
-				t.Errorf("claim nbf = %d, want %d", outClaims.NotBefore, tt.signOptions.NotBefore.Unix())
-			}
-			if !tt.signOptions.IssuedAt.IsZero() && outClaims.IssuedAt != tt.signOptions.IssuedAt.Unix() {
-				t.Errorf("claim iat = %d, want %d", outClaims.IssuedAt, tt.signOptions.IssuedAt.Unix())
 			}
 
 			if inClaims != nil {
@@ -269,35 +276,31 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// signHS256 builds a token from raw header and payload text, signed with key, so
-// that a test can produce shapes Sign itself would never emit.
-func signHS256(t *testing.T, header, payload string) string {
-	t.Helper()
+// TestRegisteredClaimsSetters covers the helpers that keep a caller from having
+// to convert time themselves, which is where seconds and milliseconds get
+// confused.
+func TestRegisteredClaimsSetters(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0)
 
-	s := testSigner(t)
-	h := base64.RawURLEncoding.EncodeToString([]byte(header))
-	p := base64.RawURLEncoding.EncodeToString([]byte(payload))
+	var c jwt.RegisteredClaims
+	c.SetID("jti-1")
+	c.SetIssuer("auth")
+	c.SetSubject("u1")
+	c.SetAudience(jwt.Audience{"api"})
+	c.SetExpiration(at.Add(time.Hour))
+	c.SetNotBefore(at)
+	c.SetIssuedAt(at)
 
-	sig, err := s.Sign([]byte(h + "." + p))
-	if err != nil {
-		t.Fatalf("Sign() error = %v", err)
+	if c.ID != "jti-1" || c.Issuer != "auth" || c.Subject != "u1" {
+		t.Errorf("string claims not set: %+v", c)
 	}
-
-	return h + "." + p + "." + base64.RawURLEncoding.EncodeToString(sig)
-}
-
-const testHeaderJSON = `{"typ":"JWT","alg":"HS256"}`
-
-// signSegments signs the two segments exactly as given, without encoding them,
-// so that a test can produce a token whose signature is valid over a segment
-// that is not valid base64url.
-func signSegments(t *testing.T, header, payload string) string {
-	t.Helper()
-
-	sig, err := testSigner(t).Sign([]byte(header + "." + payload))
-	if err != nil {
-		t.Fatalf("Sign() error = %v", err)
+	if !slices.Equal(c.Audience, jwt.Audience{"api"}) {
+		t.Errorf("aud = %v", c.Audience)
 	}
-
-	return header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(sig)
+	if c.Expiration != at.Add(time.Hour).Unix() {
+		t.Errorf("exp = %d, want %d", c.Expiration, at.Add(time.Hour).Unix())
+	}
+	if c.NotBefore != at.Unix() || c.IssuedAt != at.Unix() {
+		t.Errorf("nbf = %d, iat = %d, want %d for both", c.NotBefore, c.IssuedAt, at.Unix())
+	}
 }

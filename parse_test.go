@@ -38,6 +38,7 @@ func TestParseRejects(t *testing.T) {
 		{"header is broken json", signHS256(t, `{"alg":`, `{}`), jwt.ErrTokenInvalid},
 		{"header has trailing data", signHS256(t, `{"alg":"HS256"} junk`, `{}`), jwt.ErrTokenInvalid},
 		{"alg is absent", signHS256(t, `{"typ":"JWT"}`, `{}`), jwt.ErrTokenInvalid},
+		{"alg is an empty string", signHS256(t, `{"typ":"JWT","alg":""}`, `{}`), jwt.ErrTokenInvalid},
 		{"alg is none", signHS256(t, `{"typ":"JWT","alg":"none"}`, `{}`), jwt.ErrTokenInvalid},
 		{"alg is another algorithm", signHS256(t, `{"typ":"JWT","alg":"RS256"}`, `{}`), jwt.ErrTokenInvalid},
 		{"alg is a number", signHS256(t, `{"typ":"JWT","alg":256}`, `{}`), jwt.ErrTokenInvalid},
@@ -75,7 +76,7 @@ func TestParseRejectsForgery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHS256() error = %v", err)
 	}
-	otherKey, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, other, jwt.SignOptions{})
+	otherKey, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, other)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}

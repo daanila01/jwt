@@ -82,7 +82,7 @@ func TestAudienceMarshal(t *testing.T) {
 func TestAudienceOmittedWhenEmpty(t *testing.T) {
 	s := testSigner(t)
 
-	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s, jwt.SignOptions{})
+	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}

@@ -2,92 +2,32 @@ package jwt_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/daanila01/jwt"
 )
 
-// A nil that arrives inside an interface used to panic here.
+// Claims arrive as any, so a nil can reach this package in two shapes. A
+// literal nil is easy. A nil pointer stored in an interface is not equal to
+// nil, and marshalling it produces the JSON literal null: a token this package
+// would issue and then refuse to parse. Both must be refused instead.
 //
-// An interface holding a typed nil is not equal to nil, so a plain == nil check
-// misses it, and the method promoted from an embedded field dereferences the
-// pointer before this package can look at it. Every shape below now answers
-// with an error instead.
-//
-// The tests fail on a panic rather than recovering from one: a library that
-// panics on a caller's mistake reads to that caller as a library bug.
+// Headers are a map, which has no such trap: a nil map reads as empty and the
+// package fills in one of its own.
 
-type nilEmbedValue struct {
+type nilClaims struct {
 	jwt.RegisteredClaims
 	UserID string `json:"user_id,omitempty"`
-}
-
-type nilEmbedPointer struct {
-	*jwt.RegisteredClaims
-	UserID string `json:"user_id,omitempty"`
-}
-
-type nilHeaderEmbedValue struct {
-	jwt.RegisteredHeaders
-}
-
-type nilHeaderEmbedPointer struct {
-	*jwt.RegisteredHeaders
 }
 
 func TestSignRejectsEveryShapeOfNilClaims(t *testing.T) {
 	s := testSigner(t)
 
 	var (
-		registered   *jwt.RegisteredClaims
-		embedValue   *nilEmbedValue
-		embedPointer *nilEmbedPointer
-	)
-
-	tests := []struct {
-		name   string
-		claims func() (string, error)
-	}{
-		{"literal nil", func() (string, error) {
-			return jwt.Sign(nil, nil, s, jwt.SignOptions{})
-		}},
-		{"nil pointer to the registered set", func() (string, error) {
-			return jwt.Sign(nil, registered, s, jwt.SignOptions{})
-		}},
-		{"nil pointer to a type embedding it by value", func() (string, error) {
-			return jwt.Sign(nil, embedValue, s, jwt.SignOptions{})
-		}},
-		{"nil pointer to a type embedding it by pointer", func() (string, error) {
-			return jwt.Sign(nil, embedPointer, s, jwt.SignOptions{})
-		}},
-		{"live outer, nil embedded pointer", func() (string, error) {
-			return jwt.Sign(nil, &nilEmbedPointer{UserID: "u1"}, s, jwt.SignOptions{})
-		}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Fatalf("Sign() panicked instead of returning an error: %v", r)
-				}
-			}()
-
-			if _, err := tt.claims(); !errors.Is(err, jwt.ErrArgumentInvalid) {
-				t.Fatalf("Sign() error = %v, want %v", err, jwt.ErrArgumentInvalid)
-			}
-		})
-	}
-}
-
-func TestSignRejectsEveryShapeOfNilHeaders(t *testing.T) {
-	s := testSigner(t)
-	c := &jwt.RegisteredClaims{Subject: "u1"}
-
-	var (
-		registered   *jwt.RegisteredHeaders
-		embedValue   *nilHeaderEmbedValue
-		embedPointer *nilHeaderEmbedPointer
+		registered *jwt.RegisteredClaims
+		own        *nilClaims
+		asMap      map[string]any
 	)
 
 	tests := []struct {
@@ -95,23 +35,27 @@ func TestSignRejectsEveryShapeOfNilHeaders(t *testing.T) {
 		sign func() (string, error)
 		want error
 	}{
-		// A literal nil means "no header of my own", which is a request, not a
-		// mistake, so it is filled in rather than refused.
-		{"literal nil is filled in", func() (string, error) {
-			return jwt.Sign(nil, c, s, jwt.SignOptions{})
-		}, nil},
+		{"literal nil", func() (string, error) {
+			return jwt.Sign(nil, nil, s)
+		}, jwt.ErrArgumentInvalid},
 		{"nil pointer to the registered set", func() (string, error) {
-			return jwt.Sign(registered, c, s, jwt.SignOptions{})
+			return jwt.Sign(nil, registered, s)
 		}, jwt.ErrArgumentInvalid},
-		{"nil pointer to a type embedding it by value", func() (string, error) {
-			return jwt.Sign(embedValue, c, s, jwt.SignOptions{})
+		{"nil pointer to a caller's own type", func() (string, error) {
+			return jwt.Sign(nil, own, s)
 		}, jwt.ErrArgumentInvalid},
-		{"nil pointer to a type embedding it by pointer", func() (string, error) {
-			return jwt.Sign(embedPointer, c, s, jwt.SignOptions{})
+		{"nil map of claims", func() (string, error) {
+			return jwt.Sign(nil, asMap, s)
 		}, jwt.ErrArgumentInvalid},
-		{"live outer, nil embedded pointer", func() (string, error) {
-			return jwt.Sign(&nilHeaderEmbedPointer{}, c, s, jwt.SignOptions{})
-		}, jwt.ErrArgumentInvalid},
+
+		// A live but empty value is not a mistake: a token with no claims at
+		// all is unusual, not invalid.
+		{"an empty registered set", func() (string, error) {
+			return jwt.Sign(nil, &jwt.RegisteredClaims{}, s)
+		}, nil},
+		{"an empty map", func() (string, error) {
+			return jwt.Sign(nil, map[string]any{}, s)
+		}, nil},
 	}
 
 	for _, tt := range tests {
@@ -122,61 +66,91 @@ func TestSignRejectsEveryShapeOfNilHeaders(t *testing.T) {
 				}
 			}()
 
-			if _, err := tt.sign(); !errors.Is(err, tt.want) {
+			token, err := tt.sign()
+			if !errors.Is(err, tt.want) {
 				t.Fatalf("Sign() error = %v, want %v", err, tt.want)
+			}
+			if tt.want != nil {
+				return
+			}
+			if body := strings.Split(token, ".")[1]; body == "bnVsbA" {
+				t.Error("the payload is the JSON literal null")
 			}
 		})
 	}
 }
 
-func TestParseRejectsEveryShapeOfNilDestination(t *testing.T) {
+func TestSignAcceptsANilHeader(t *testing.T) {
+	s := testSigner(t)
+
+	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	if got := decodeSegment(t, token, 0); got != `{"alg":"HS256"}` {
+		t.Errorf("header = %s, want only what the package writes", got)
+	}
+}
+
+func TestParseAcceptsNilDestinations(t *testing.T) {
 	v := testSigner(t)
 	token := signHS256(t, testHeaderJSON, `{"sub":"u1"}`)
 
-	var (
-		claims       *jwt.RegisteredClaims
-		headers      *jwt.RegisteredHeaders
-		embedValue   *nilEmbedValue
-		embedPointer *nilEmbedPointer
-	)
+	t.Run("both nil still verifies", func(t *testing.T) {
+		if err := jwt.Parse(token, nil, nil, v, jwt.ParseOptions{}); err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+		forged := token[:len(token)-4] + "AAAA"
+		if err := jwt.Parse(forged, nil, nil, v, jwt.ParseOptions{}); !errors.Is(err, jwt.ErrSignatureInvalid) {
+			t.Fatalf("a forged token passed while parsing into nothing: %v", err)
+		}
+	})
 
-	tests := []struct {
-		name  string
-		parse func() error
-		want  error
-	}{
-		// Both nil means "verify it, I want nothing back", which is allowed.
-		{"literal nils are filled in", func() error {
-			return jwt.Parse(token, nil, nil, v, jwt.ParseOptions{})
-		}, nil},
-		{"nil pointer to the registered claims", func() error {
-			return jwt.Parse(token, nil, claims, v, jwt.ParseOptions{})
-		}, jwt.ErrArgumentInvalid},
-		{"nil pointer to the registered headers", func() error {
-			return jwt.Parse(token, headers, nil, v, jwt.ParseOptions{})
-		}, jwt.ErrArgumentInvalid},
-		{"nil pointer to a type embedding by value", func() error {
-			return jwt.Parse(token, nil, embedValue, v, jwt.ParseOptions{})
-		}, jwt.ErrArgumentInvalid},
-		{"nil pointer to a type embedding by pointer", func() error {
-			return jwt.Parse(token, nil, embedPointer, v, jwt.ParseOptions{})
-		}, jwt.ErrArgumentInvalid},
-		{"live outer, nil embedded pointer", func() error {
-			return jwt.Parse(token, nil, &nilEmbedPointer{}, v, jwt.ParseOptions{})
-		}, jwt.ErrArgumentInvalid},
-	}
+	t.Run("nil header, live claims", func(t *testing.T) {
+		var c jwt.RegisteredClaims
+		if err := jwt.Parse(token, nil, &c, v, jwt.ParseOptions{}); err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+		if c.Subject != "u1" {
+			t.Errorf("sub = %q, want u1", c.Subject)
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Fatalf("Parse() panicked instead of returning an error: %v", r)
-				}
-			}()
+	t.Run("live header, nil claims", func(t *testing.T) {
+		h := make(map[string]any)
+		if err := jwt.Parse(token, &h, nil, v, jwt.ParseOptions{}); err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+		if h["alg"] != "HS256" {
+			t.Errorf("alg = %v, want HS256", h["alg"])
+		}
+	})
 
-			if err := tt.parse(); !errors.Is(err, tt.want) {
-				t.Fatalf("Parse() error = %v, want %v", err, tt.want)
+	// A nil map cannot be filled in place, so whatever the package does with it
+	// must at least not be an error and not a panic.
+	t.Run("a nil map as the header destination", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Parse() panicked on a nil map: %v", r)
 			}
-		})
-	}
+		}()
+
+		var h map[string]any
+		if err := jwt.Parse(token, &h, nil, v, jwt.ParseOptions{}); err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+	})
+
+	t.Run("a nil pointer as the claims destination", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Parse() panicked on a typed nil: %v", r)
+			}
+		}()
+
+		var c *jwt.RegisteredClaims
+		if err := jwt.Parse(token, nil, c, v, jwt.ParseOptions{}); !errors.Is(err, jwt.ErrArgumentInvalid) {
+			t.Fatalf("Parse() error = %v, want %v", err, jwt.ErrArgumentInvalid)
+		}
+	})
 }

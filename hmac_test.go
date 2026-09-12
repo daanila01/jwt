@@ -234,20 +234,18 @@ func TestHMACThroughSignAndParse(t *testing.T) {
 				t.Fatalf("constructor error = %v", err)
 			}
 
-			token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s, jwt.SignOptions{})
+			token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, s)
 			if err != nil {
 				t.Fatalf("Sign() error = %v", err)
 			}
 
-			var (
-				h jwt.RegisteredHeaders
-				c jwt.RegisteredClaims
-			)
+			h := make(map[string]any)
+			var c jwt.RegisteredClaims
 			if err := jwt.Parse(token, &h, &c, s, jwt.ParseOptions{}); err != nil {
 				t.Fatalf("Parse() error = %v", err)
 			}
-			if h.Algorithm != a.alg {
-				t.Errorf("alg = %q, want %q", h.Algorithm, a.alg)
+			if h["alg"] != a.alg {
+				t.Errorf("alg = %q, want %q", h["alg"], a.alg)
 			}
 			if c.Subject != "u1" {
 				t.Errorf("sub = %q, want u1", c.Subject)
@@ -271,7 +269,7 @@ func TestHMACRejectsAnotherFamilyMember(t *testing.T) {
 		t.Fatalf("NewHS384() error = %v", err)
 	}
 
-	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, signer, jwt.SignOptions{})
+	token, err := jwt.Sign(nil, &jwt.RegisteredClaims{Subject: "u1"}, signer)
 	if err != nil {
 		t.Fatalf("Sign() error = %v", err)
 	}
@@ -336,7 +334,7 @@ func TestHMACThroughSignAndParseConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			c := jwt.RegisteredClaims{Subject: "u1"}
-			token, err := jwt.Sign(nil, &c, s, jwt.SignOptions{})
+			token, err := jwt.Sign(nil, &c, s)
 			if err != nil {
 				t.Errorf("Sign() error = %v", err)
 				return
