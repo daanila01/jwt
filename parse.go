@@ -101,10 +101,12 @@ func Parse(token string, h map[string]any, c any, verifier Verifier, options ...
 	if verifier == nil && opts.ResolveVerifier == nil {
 		return fmt.Errorf("%w: verifier is nil", ErrArgumentInvalid)
 	}
-	// A literal nil means "decode nothing"; a nil held inside an interface is a
-	// caller's uninitialised variable, and writing into it is impossible.
-	if c != nil && isNil(c) {
-		return fmt.Errorf("%w: claims is nil", ErrArgumentInvalid)
+	// A literal nil means "decode nothing"; anything else has to be somewhere a
+	// JSON object can actually be written.
+	if c != nil {
+		if err := checkDestination(c); err != nil {
+			return err
+		}
 	}
 	if len(token) == 0 {
 		return fmt.Errorf("%w: token is empty", ErrTokenInvalid)
@@ -185,7 +187,7 @@ func Parse(token string, h map[string]any, c any, verifier Verifier, options ...
 		opts.NotBeforeValidation || opts.ExpirationValidation {
 		var cl RegisteredClaims
 		if err := unmarshalBase64(segments[1], &cl); err != nil {
-			return fmt.Errorf("%w: failed to unmarshal claims: %w", classifyUnmarshal(err), err)
+			return fmt.Errorf("%w: failed to unmarshal claims: %w", ErrTokenInvalid, err)
 		}
 		if opts.ExpectedIssuer != "" && cl.Issuer != opts.ExpectedIssuer {
 			return fmt.Errorf("%w: issuer mismatch: expected %s, got %s", ErrTokenInvalid, opts.ExpectedIssuer, cl.Issuer)
@@ -216,7 +218,7 @@ func Parse(token string, h map[string]any, c any, verifier Verifier, options ...
 
 	if c != nil {
 		if err := unmarshalBase64(segments[1], c); err != nil {
-			return fmt.Errorf("%w: failed to unmarshal claims: %w", classifyUnmarshal(err), err)
+			return fmt.Errorf("%w: failed to unmarshal claims: %w", ErrTokenInvalid, err)
 		}
 	}
 

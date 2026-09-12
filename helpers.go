@@ -3,7 +3,6 @@ package jwt
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 )
@@ -24,30 +23,34 @@ func isNil(v any) bool {
 	return false
 }
 
-// classifyUnmarshal decides whose fault a failed decode was.
+// checkDestination reports whether a value can receive a JSON object at all.
 //
-// encoding/json reports two very different things through the same call. A
-// destination that cannot be written to, or a whole value that does not fit the
-// type it was given, is the caller's mistake: the token may be perfectly good.
-// A field inside the payload with the wrong type, or JSON that does not parse,
-// is the token's.
+// A failed decode has two very different causes, and they want different
+// answers from an HTTP handler: a destination of the wrong shape is the
+// caller's mistake and says nothing about the token, while a field of the wrong
+// type inside the payload is the token's.
 //
-// The two answer differently at the HTTP layer, so they must not share a
-// sentinel.
-func classifyUnmarshal(err error) error {
-	var invalid *json.InvalidUnmarshalError
-	if errors.As(err, &invalid) {
-		return ErrArgumentInvalid
+// Telling them apart from the error afterwards looked possible and was not:
+// json.UnmarshalTypeError names the field it failed on, but not when the
+// failure came out of a type's own UnmarshalJSON, and whether it does has
+// changed between Go releases. So the destination is judged before json runs,
+// where the answer depends on nothing but the type in hand.
+//
+// A claims set is a JSON object, so only a pointer to a struct, a map or an
+// interface can hold one. A *string or a *[]string cannot, whatever the token
+// says.
+func checkDestination(v any) error {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return fmt.Errorf("%w: claims must be a non-nil pointer", ErrArgumentInvalid)
 	}
 
-	// A type error names the field it failed on. An empty name means the
-	// mismatch was at the top level, which is a destination of the wrong shape.
-	var mismatch *json.UnmarshalTypeError
-	if errors.As(err, &mismatch) && mismatch.Field == "" {
-		return ErrArgumentInvalid
+	switch rv.Elem().Kind() {
+	case reflect.Struct, reflect.Map, reflect.Interface:
+		return nil
 	}
 
-	return ErrTokenInvalid
+	return fmt.Errorf("%w: a JSON object cannot be read into %T", ErrArgumentInvalid, v)
 }
 
 func marshalBase64(v any) (string, error) {

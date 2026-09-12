@@ -115,6 +115,11 @@ func TestParseRejectsForgery(t *testing.T) {
 // reported as the caller's mistake, while a payload with a field of the wrong
 // type is reported as the token's. They answer differently at the HTTP layer,
 // so a caller has to be able to tell them apart.
+//
+// The judgement is made on the destination before json runs, because reading it
+// out of the error afterwards is not stable: an UnmarshalTypeError raised inside
+// a type's own UnmarshalJSON does not always carry the field name, and whether
+// it does has changed between Go releases.
 func TestParseBlamesTheRightSide(t *testing.T) {
 	v := testSigner(t)
 	good := signHS256(t, testHeaderJSON, `{"sub":"u1"}`)
