@@ -57,7 +57,7 @@ func TestRFC7515A1(t *testing.T) {
 
 	h := make(map[string]any)
 	var c jwt.RegisteredClaims
-	err := jwt.Parse(rfc7515A1Token, &h, &c, v, jwt.ParseOptions{
+	err := jwt.Parse(rfc7515A1Token, h, &c, v, jwt.ParseOptions{
 		ExpirationValidation: true,
 		Time:                 time.Unix(1_300_819_379, 0),
 	})

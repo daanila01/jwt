@@ -57,12 +57,20 @@ type ParseOptions struct {
 // signature work is done.
 //
 // Pass nil for h or c to skip decoding that half; the token is still verified in
-// full. Only a literal nil: a nil pointer stored in an interface is not nil and
-// will panic.
+// full either way.
 //
-// Decoding merges into h and c and does not clear them first, so a field set by
-// an earlier token survives one that omits it. Pass freshly zeroed values.
-func Parse(token string, h *map[string]any, c any, verifier Verifier, options ...ParseOptions) error {
+// A header map is filled in place, so give one that has been made:
+//
+//	header := map[string]any{}
+//	err := jwt.Parse(token, header, &claims, verifier, jwt.ParseOptions{})
+//
+// A nil map cannot be filled, which is why nil reads as "I do not need the
+// header" rather than as a mistake. Claims follow the [encoding/json] rule
+// instead: give a pointer, or there is nowhere to write.
+//
+// Decoding merges and does not clear first, so a field left by an earlier token
+// survives one that omits it. Pass freshly zeroed values.
+func Parse(token string, h map[string]any, c any, verifier Verifier, options ...ParseOptions) error {
 	if verifier == nil {
 		return fmt.Errorf("%w: verifier is nil", ErrArgumentInvalid)
 	}
@@ -95,19 +103,15 @@ func Parse(token string, h *map[string]any, c any, verifier Verifier, options ..
 		}
 	}
 
-	// The header is read either way, because alg lives in it. When the caller
-	// asked for it the same map is handed back; when they passed nil it is a
-	// throwaway. Unmarshalling the JSON literal null into a map pointer sets it
-	// to nil, so the result is read from a local and written back afterwards.
-	header := make(map[string]any)
-	if h != nil && *h != nil {
-		header = *h
+	// The header is read either way, because alg lives in it. A map given by the
+	// caller is filled in place, since a map value carries a reference to the
+	// same storage; nil means they did not ask for it, and a throwaway is used.
+	header := h
+	if header == nil {
+		header = make(map[string]any)
 	}
 	if err := unmarshalBase64(segments[0], &header); err != nil {
 		return fmt.Errorf("%w: failed to unmarshal header: %w", ErrTokenInvalid, err)
-	}
-	if h != nil {
-		*h = header
 	}
 	if alg, ok := header[headerAlgorithm]; ok {
 		if alg == "" {
@@ -146,7 +150,7 @@ func Parse(token string, h *map[string]any, c any, verifier Verifier, options ..
 		opts.NotBeforeValidation || opts.ExpirationValidation {
 		var cl RegisteredClaims
 		if err := unmarshalBase64(segments[1], &cl); err != nil {
-			return fmt.Errorf("%w: failed to unmarshal claims: %w", ErrTokenInvalid, err)
+			return fmt.Errorf("%w: failed to unmarshal claims: %w", classifyUnmarshal(err), err)
 		}
 		if opts.ExpectedIssuer != "" && cl.Issuer != opts.ExpectedIssuer {
 			return fmt.Errorf("%w: issuer mismatch: expected %s, got %s", ErrTokenInvalid, opts.ExpectedIssuer, cl.Issuer)
@@ -177,7 +181,7 @@ func Parse(token string, h *map[string]any, c any, verifier Verifier, options ..
 
 	if c != nil {
 		if err := unmarshalBase64(segments[1], c); err != nil {
-			return fmt.Errorf("%w: failed to unmarshal claims: %w", ErrTokenInvalid, err)
+			return fmt.Errorf("%w: failed to unmarshal claims: %w", classifyUnmarshal(err), err)
 		}
 	}
 

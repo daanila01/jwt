@@ -41,10 +41,14 @@
 // where a token signed with RSA is re-signed with HMAC using the public key as
 // the secret.
 //
-// Both destinations follow the [encoding/json] rule: pass a pointer, or there is
-// nowhere to write. Pass nil for either to skip decoding that half while still
-// verifying the token in full. Decoding merges rather than clears, so a field
-// left by an earlier token survives one that omits it.
+// The two destinations are not shaped alike, because the data is not. A header
+// map is filled in place, so hand over one that has been made; a nil map cannot
+// be, which is why nil reads as "I do not need the header". Claims follow the
+// [encoding/json] rule instead: pass a pointer, or there is nowhere to write.
+//
+// Pass nil for either to skip decoding that half while still verifying the
+// token in full. Decoding merges rather than clears, so a field left by an
+// earlier token survives one that omits it.
 //
 // # Concurrency
 //

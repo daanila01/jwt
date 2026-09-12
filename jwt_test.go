@@ -232,7 +232,7 @@ func TestRoundTrip(t *testing.T) {
 
 			outHeader := make(map[string]any)
 			var outClaims testClaims
-			if err := jwt.Parse(token, &outHeader, &outClaims, verifier, tt.parseOptions); !errors.Is(err, tt.wantParseErr) {
+			if err := jwt.Parse(token, outHeader, &outClaims, verifier, tt.parseOptions); !errors.Is(err, tt.wantParseErr) {
 				t.Fatalf("Parse() error = %v, want %v", err, tt.wantParseErr)
 			}
 			if tt.wantParseErr != nil {

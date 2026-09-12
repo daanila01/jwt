@@ -61,13 +61,11 @@ func FuzzParse(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, token string) {
-		var (
-			header map[string]any
-			claims jwt.RegisteredClaims
-		)
+		header := map[string]any{}
+		var claims jwt.RegisteredClaims
 
 		// Every option on, so the fuzzer reaches the validation paths too.
-		err := jwt.Parse(token, &header, &claims, signer, jwt.ParseOptions{
+		err := jwt.Parse(token, header, &claims, signer, jwt.ParseOptions{
 			ExpirationValidation: true,
 			NotBeforeValidation:  true,
 			ExpectedIssuer:       "auth",
@@ -115,8 +113,8 @@ func FuzzParseHeaderOnly(f *testing.F) {
 			encodeSegment(`{"sub":"u1"}`),
 		)
 
-		var out map[string]any
-		if err := jwt.Parse(token, &out, nil, signer, jwt.ParseOptions{}); err == nil {
+		out := map[string]any{}
+		if err := jwt.Parse(token, out, nil, signer, jwt.ParseOptions{}); err == nil {
 			// Accepting is only correct when the header really did name our
 			// algorithm; anything else means the check was bypassed.
 			if got, _ := out["alg"].(string); got != jwt.AlgorithmHS256 {

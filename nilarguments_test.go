@@ -118,7 +118,7 @@ func TestParseAcceptsNilDestinations(t *testing.T) {
 
 	t.Run("live header, nil claims", func(t *testing.T) {
 		h := make(map[string]any)
-		if err := jwt.Parse(token, &h, nil, v, jwt.ParseOptions{}); err != nil {
+		if err := jwt.Parse(token, h, nil, v, jwt.ParseOptions{}); err != nil {
 			t.Fatalf("Parse() error = %v", err)
 		}
 		if h["alg"] != "HS256" {
@@ -126,18 +126,21 @@ func TestParseAcceptsNilDestinations(t *testing.T) {
 		}
 	})
 
-	// A nil map cannot be filled in place, so whatever the package does with it
-	// must at least not be an error and not a panic.
+	// A nil map cannot be filled in place, which is why nil means "I do not
+	// need the header" rather than being an error. The token is still verified
+	// in full; the caller simply gets nothing back.
 	t.Run("a nil map as the header destination", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("Parse() panicked on a nil map: %v", r)
-			}
-		}()
-
 		var h map[string]any
-		if err := jwt.Parse(token, &h, nil, v, jwt.ParseOptions{}); err != nil {
+		if err := jwt.Parse(token, h, nil, v, jwt.ParseOptions{}); err != nil {
 			t.Fatalf("Parse() error = %v", err)
+		}
+		if h != nil {
+			t.Errorf("a nil map came back as %v, want it left alone", h)
+		}
+
+		forged := token[:len(token)-4] + "AAAA"
+		if err := jwt.Parse(forged, h, nil, v, jwt.ParseOptions{}); !errors.Is(err, jwt.ErrSignatureInvalid) {
+			t.Fatal("a forged token passed while the header was not wanted")
 		}
 	})
 

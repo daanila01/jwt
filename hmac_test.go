@@ -241,7 +241,7 @@ func TestHMACThroughSignAndParse(t *testing.T) {
 
 			h := make(map[string]any)
 			var c jwt.RegisteredClaims
-			if err := jwt.Parse(token, &h, &c, s, jwt.ParseOptions{}); err != nil {
+			if err := jwt.Parse(token, h, &c, s, jwt.ParseOptions{}); err != nil {
 				t.Fatalf("Parse() error = %v", err)
 			}
 			if h["alg"] != a.alg {

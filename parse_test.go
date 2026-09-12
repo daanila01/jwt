@@ -111,6 +111,41 @@ func TestParseRejectsForgery(t *testing.T) {
 	}
 }
 
+// TestParseBlamesTheRightSide checks that a destination of the wrong shape is
+// reported as the caller's mistake, while a payload with a field of the wrong
+// type is reported as the token's. They answer differently at the HTTP layer,
+// so a caller has to be able to tell them apart.
+func TestParseBlamesTheRightSide(t *testing.T) {
+	v := testSigner(t)
+	good := signHS256(t, testHeaderJSON, `{"sub":"u1"}`)
+
+	tests := []struct {
+		name  string
+		token string
+		into  any
+		want  error
+	}{
+		{"a string as the destination", good, new(string), jwt.ErrArgumentInvalid},
+		{"an int as the destination", good, new(int), jwt.ErrArgumentInvalid},
+		{"a slice as the destination", good, new([]string), jwt.ErrArgumentInvalid},
+		{"a value rather than a pointer", good, jwt.RegisteredClaims{}, jwt.ErrArgumentInvalid},
+
+		{"a field of the wrong type in the token", signHS256(t, testHeaderJSON, `{"aud":42}`), new(jwt.RegisteredClaims), jwt.ErrTokenInvalid},
+		{"a payload that does not parse", signHS256(t, testHeaderJSON, `{"sub":`), new(jwt.RegisteredClaims), jwt.ErrTokenInvalid},
+
+		{"a matching destination", good, new(jwt.RegisteredClaims), nil},
+		{"a map takes anything", good, new(map[string]any), nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := jwt.Parse(tt.token, nil, tt.into, v, jwt.ParseOptions{}); !errors.Is(err, tt.want) {
+				t.Fatalf("Parse() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 // TestParseArguments covers what Parse does before it looks at the token.
 func TestParseArguments(t *testing.T) {
 	v := testSigner(t)

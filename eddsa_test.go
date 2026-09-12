@@ -227,7 +227,7 @@ func TestEdDSAThroughSignAndParse(t *testing.T) {
 
 	h := make(map[string]any)
 	var c jwt.RegisteredClaims
-	if err := jwt.Parse(token, &h, &c, v, jwt.ParseOptions{}); err != nil {
+	if err := jwt.Parse(token, h, &c, v, jwt.ParseOptions{}); err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}
 

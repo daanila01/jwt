@@ -70,8 +70,18 @@ func main() {
 ```
 
 Pass `nil` for the header when you do not need to read it, and `nil` for the claims when
-you only want to know whether the token is authentic. Both destinations follow the
-`encoding/json` rule: give a pointer, or there is nowhere to write.
+you only want to know whether the token is authentic.
+
+The two destinations are not shaped alike, because the data is not. A header map is
+filled in place, so hand over one that has been made:
+
+```go
+header := map[string]any{}
+err := jwt.Parse(token, header, &claims, verifier, jwt.ParseOptions{})
+```
+
+Claims follow the `encoding/json` rule instead: give a pointer, or there is nowhere to
+write.
 
 ## Errors
 
