@@ -1,0 +1,52 @@
+name: CD
+
+on:
+    workflow_run:
+        workflows: ["CI"]
+        types: [completed]
+        branches: [main]
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        if: github.event.workflow_run.conclusion == 'success'
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  ref: ${{ github.event.workflow_run.head_sha }}
+
+            - name: Read version
+              id: version
+              run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+            # VERSION is bumped by hand, so most pushes to main carry a version that
+            # is already tagged. That is the normal case, not a failure.
+            - name: Skip if the tag already exists
+              id: check
+              run: |
+                  if git rev-parse -q --verify "refs/tags/${{ steps.version.outputs.version }}" >/dev/null; then
+                      echo "exists=true" >> "$GITHUB_OUTPUT"
+                      echo "Tag ${{ steps.version.outputs.version }} already exists, nothing to release."
+                  else
+                      echo "exists=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Create tag
+              if: steps.check.outputs.exists == 'false'
+              run: |
+                  git tag "${{ steps.version.outputs.version }}"
+                  git push origin "${{ steps.version.outputs.version }}"
+
+            # A Go module is distributed by its tag alone; the release only carries notes.
+            - name: Create release
+              if: steps.check.outputs.exists == 'false'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  gh release create "${{ steps.version.outputs.version }}" \
+                      --title "${{ steps.version.outputs.version }}" \
+                      --generate-notes
