@@ -1,4 +1,4 @@
-// Package jwk reads keys in the JSON Web Key format of RFC 7517.
+// Package jwk reads and writes keys in the JSON Web Key format of RFC 7517.
 //
 // This is how keys travel between parties. A service that verifies tokens it
 // did not issue fetches its issuer's keys as a JWK Set and picks one by the kid
@@ -6,7 +6,8 @@
 // base64url, not as PEM, which is why the standard library cannot read them.
 //
 // The package turns those documents into keys, and keys into a [jwt.Signer] or
-// [jwt.Verifier]. It does not fetch anything. Where the bytes come from, how
+// [jwt.Verifier]. On the issuer's side it writes public keys back out as the
+// document its relying parties fetch. It does not fetch or serve anything. Where the bytes come from, how
 // long they are cached and what happens when the issuer is unreachable are
 // decisions only the application can make, and a library that made them would
 // be one that cannot run offline and is awkward to test.
@@ -90,34 +91,35 @@ type Key struct {
 }
 
 // jwkJSON is the wire shape. Every number is base64url of a big-endian integer,
-// unpadded, as RFC 7517 requires.
+// unpadded, as RFC 7517 requires. Every member is optional on the way out, so a
+// written key carries only what its type defines.
 type jwkJSON struct {
 	KeyType    string   `json:"kty"`
-	KeyID      string   `json:"kid"`
-	Algorithm  string   `json:"alg"`
-	Use        string   `json:"use"`
-	Operations []string `json:"key_ops"`
+	KeyID      string   `json:"kid,omitempty"`
+	Algorithm  string   `json:"alg,omitempty"`
+	Use        string   `json:"use,omitempty"`
+	Operations []string `json:"key_ops,omitempty"`
 
-	Curve string `json:"crv"`
+	Curve string `json:"crv,omitempty"`
 
 	// RSA
-	Modulus  string `json:"n"`
-	Exponent string `json:"e"`
+	Modulus  string `json:"n,omitempty"`
+	Exponent string `json:"e,omitempty"`
 
 	// EC and OKP public, RSA private
-	X string `json:"x"`
-	Y string `json:"y"`
-	D string `json:"d"`
+	X string `json:"x,omitempty"`
+	Y string `json:"y,omitempty"`
+	D string `json:"d,omitempty"`
 
 	// RSA private
-	P  string `json:"p"`
-	Q  string `json:"q"`
-	Dp string `json:"dp"`
-	Dq string `json:"dq"`
-	Qi string `json:"qi"`
+	P  string `json:"p,omitempty"`
+	Q  string `json:"q,omitempty"`
+	Dp string `json:"dp,omitempty"`
+	Dq string `json:"dq,omitempty"`
+	Qi string `json:"qi,omitempty"`
 
 	// symmetric
-	K string `json:"k"`
+	K string `json:"k,omitempty"`
 }
 
 // Parse reads a single JSON Web Key.
@@ -406,6 +408,13 @@ func (k *Key) Verifier() (jwt.Verifier, error) {
 		return nil, err
 	}
 
+	return k.verifier()
+}
+
+// verifier builds the verifier without consulting use and key_ops. The writer
+// calls it to check that a key is usable, which is a different question from
+// whether the key allows being used.
+func (k *Key) verifier() (jwt.Verifier, error) {
 	alg, err := k.algorithm()
 	if err != nil {
 		return nil, err

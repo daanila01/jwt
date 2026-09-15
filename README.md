@@ -246,6 +246,34 @@ Fetching, caching and refreshing the document are not here, and will not be. Whe
 the bytes come from, how long they are trusted and what happens when the issuer is
 unreachable are decisions only your service can make.
 
+## Publishing your own keys
+
+The other side of the same exchange. An issuer publishes its public keys as a JWK
+Set, and its relying parties read that document with `ParseSet`:
+
+```go
+current, err := jwk.FromPublicKey(&privateKey.PublicKey)
+current.ID = "2024-07"
+current.Algorithm = jwt.AlgorithmRS256
+current.Use = jwk.UseSignature
+
+document, err := json.Marshal(jwk.NewSet(current, retired))
+```
+
+Only the public half is ever written. A key read from a document that carried its
+private half comes out without it, so a JWK Set cannot leak a private key through a
+`json.Marshal` nobody looked at twice. A symmetric key has no public half and is
+refused.
+
+A key this package could not verify with is refused as well: an `alg` that does not
+fit the key, an RSA key under 2048 bits, an RSA key with no `alg` at all. A document
+like that breaks every relying party that fetches it, and the failure belongs where
+the key is written, not where it is read. Two keys under one `kid` are refused for
+the same reason.
+
+Serving the document is not here either. Rotated keys stay in it until the last
+token they signed has expired.
+
 ## Security
 
 The known attacks against JWT libraries are closed by construction, not by configuration.
